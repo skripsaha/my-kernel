@@ -16,6 +16,7 @@
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
 #include "event_ipc.h"
+#include "auth.h"
 #include "shell.h"
 #include "serial.h"
 #include "usermode.h"
@@ -140,6 +141,11 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     kprintf("\n%[H]=== Step 6.5: Event-Based IPC === %[D]\n");
     event_ipc_init();
     kprintf("%[S] Event-based IPC initialized (NO syscalls!)%[D]\n");
+
+    // === AUTHENTICATION SYSTEM (Wizards, Apprentices, Guilds!) ===
+    kprintf("\n%[H]=== Step 6.6: Authentication System === %[D]\n");
+    auth_init();
+    kprintf("%[S] Authentication system initialized%[D]\n");
 
     kprintf("%[H]System ready. Enabling interrupts for testing...%[D]\n");
     
