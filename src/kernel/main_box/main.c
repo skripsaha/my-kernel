@@ -16,6 +16,8 @@
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
 #include "event_ipc.h"
+#include "event_ipc_demo.h"
+#include "auth.h"
 #include "shell.h"
 #include "serial.h"
 #include "usermode.h"
@@ -141,6 +143,11 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     event_ipc_init();
     kprintf("%[S] Event-based IPC initialized (NO syscalls!)%[D]\n");
 
+    // === AUTHENTICATION SYSTEM (Wizards, Apprentices, Guilds!) ===
+    kprintf("\n%[H]=== Step 6.6: Authentication System === %[D]\n");
+    auth_init();
+    kprintf("%[S] Authentication system initialized%[D]\n");
+
     kprintf("%[H]System ready. Enabling interrupts for testing...%[D]\n");
     
     // Включаем прерывания для тестирования
@@ -177,6 +184,9 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     kprintf("\n%[H]=== Running Event-Driven System Demo === %[D]\n");
     eventdriven_demo_run();
     kprintf("%[S] Demo completed!%[D]\n");
+
+    // === EVENT-BASED IPC DEMONSTRATION ===
+    event_ipc_demo_run();
 
     // === SHELL INITIALIZATION ===
     kprintf("\n%[H]=== Starting BoxOS Shell ===%[D]\n\n");

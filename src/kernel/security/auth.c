@@ -74,14 +74,31 @@ void auth_init(void) {
     memset(user_db, 0, sizeof(user_db));
     user_count = 0;
 
-    // Create default root user with random password
-    // IMPORTANT: On first boot, system should prompt for root password
     kprintf("[AUTH] Initializing authentication system...\n");
-    kprintf("[AUTH] %[W]WARNING: Default accounts disabled for security%[D]\n");
-    kprintf("[AUTH] Use 'auth_add_user()' to create initial admin account\n");
+    kprintf("[AUTH] BoxOS INNOVATIVE: Wizards, Apprentices, Guilds!\n");
+
+    // Create THE WIZARD (uid=0) - default superuser account
+    // Password: "wizard" (for demo - CHANGE IN PRODUCTION!)
+    UserCredentials* wizard = &user_db[0];
+    wizard->user_id = 0;  // THE WIZARD always has uid=0
+    wizard->guild_id = 0;  // Wizard's own guild
+    strncpy(wizard->username, "wizard", AUTH_USERNAME_MAX - 1);
+    wizard->user_type = USER_TYPE_WIZARD;
+    wizard->is_active = true;
+    wizard->failed_attempts = 0;
+    wizard->last_login = 0;
+
+    // Generate salt and hash password
+    auth_generate_salt(wizard->salt);
+    auth_hash_password("wizard", wizard->salt, wizard->password_hash);
+
+    user_count = 1;
+
+    kprintf("[AUTH] %[S]The Wizard created%[D] (uid=0, username='wizard')\n");
+    kprintf("[AUTH] %[W]Default password: 'wizard' - CHANGE IN PRODUCTION!%[D]\n");
 }
 
-int auth_add_user(const char* username, const char* password, int is_admin) {
+int auth_add_user(const char* username, const char* password, int is_wizard) {
     if (!username || !password) return -1;
     if (strlen(username) == 0 || strlen(username) >= AUTH_USERNAME_MAX) return -1;
     if (strlen(password) < 4) {
@@ -111,9 +128,18 @@ int auth_add_user(const char* username, const char* password, int is_admin) {
     UserCredentials* user = &user_db[user_count];
     memset(user, 0, sizeof(UserCredentials));
 
-    // Assign user_id (0 = root, 1+ = normal users)
-    user->user_id = (strcmp(username, "root") == 0) ? 0 : (user_count + 1000);
-    user->group_id = user->user_id;  // Default: primary group = user_id
+    // Assign user_id and type
+    if (is_wizard) {
+        // Another wizard (rare, but allowed)
+        user->user_id = user_count;  // Wizards can have uid < 1000
+        user->user_type = USER_TYPE_WIZARD;
+        user->guild_id = 0;  // Wizards guild
+    } else {
+        // Apprentice (normal user)
+        user->user_id = 1000 + user_count;  // Apprentices start at uid=1000
+        user->user_type = USER_TYPE_APPRENTICE;
+        user->guild_id = 1000;  // Default apprentices guild
+    }
 
     strncpy(user->username, username, AUTH_USERNAME_MAX - 1);
     user->username[AUTH_USERNAME_MAX - 1] = '\0';
@@ -122,8 +148,7 @@ int auth_add_user(const char* username, const char* password, int is_admin) {
     auth_generate_salt(user->salt);
     auth_hash_password(password, user->salt, user->password_hash);
 
-    user->is_admin = is_admin;
-    user->is_active = 1;
+    user->is_active = true;
     user->failed_attempts = 0;
     user->last_login = 0;
 
@@ -131,8 +156,9 @@ int auth_add_user(const char* username, const char* password, int is_admin) {
 
     spin_unlock(&auth_lock);
 
-    kprintf("[AUTH] %[S]User '%s' created successfully%[D] (admin: %s)\n",
-           username, is_admin ? "yes" : "no");
+    const char* type_str = is_wizard ? "Wizard" : "Apprentice";
+    kprintf("[AUTH] %[S]%s '%s' created%[D] (uid=%u, guild=%u)\n",
+           type_str, username, user->user_id, user->guild_id);
 
     return 0;
 }
@@ -203,9 +229,9 @@ int auth_is_admin(const char* username) {
 
     for (uint32_t i = 0; i < user_count; i++) {
         if (strcmp(user_db[i].username, username) == 0) {
-            int is_admin = user_db[i].is_admin;
+            int is_wizard = (user_db[i].user_type == USER_TYPE_WIZARD);
             spin_unlock(&auth_lock);
-            return is_admin;
+            return is_wizard;  // Returns 1 if Wizard, 0 if Apprentice
         }
     }
 
@@ -318,10 +344,10 @@ UserSession* auth_create_session(const char* username) {
 
     // Initialize session
     session->user_id = user->user_id;
-    session->group_id = user->group_id;
+    session->guild_id = user->guild_id;  // GUILDS, not groups!
     strncpy(session->username, user->username, AUTH_USERNAME_MAX - 1);
     session->username[AUTH_USERNAME_MAX - 1] = '\0';
-    session->is_admin = user->is_admin;
+    session->user_type = user->user_type;  // WIZARD or APPRENTICE
     session->login_time = rdtsc();
 
     // Update last login
@@ -329,8 +355,9 @@ UserSession* auth_create_session(const char* username) {
 
     spin_unlock(&auth_lock);
 
-    kprintf("[AUTH] Session created for user '%s' (uid=%u, gid=%u)\n",
-            username, session->user_id, session->group_id);
+    const char* type_str = (session->user_type == USER_TYPE_WIZARD) ? "Wizard" : "Apprentice";
+    kprintf("[AUTH] Session created for %s '%s' (uid=%u, guild=%u)\n",
+            type_str, username, session->user_id, session->guild_id);
 
     return session;
 }
