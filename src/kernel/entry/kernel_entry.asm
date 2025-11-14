@@ -18,22 +18,29 @@ global hide_cursor
 global user_experience_level
 
 _start:
+    ; === CRITICAL FIX: Save parameters from stage2 IMMEDIATELY! ===
+    ; stage2 passes: RDI=e820_map, RSI=e820_count, RDX=mem_start
+    ; Use callee-saved registers R12-R14 to preserve across stack/BSS operations
+    mov r12, rdi                ; R12 = e820_map pointer
+    mov r13, rsi                ; R13 = e820_count
+    mov r14, rdx                ; R14 = mem_start
+
     ; Отладочное сообщение через последовательный порт
     mov al, 'K'
     mov dx, 0x3f8
     out dx, al
-    
+
     ; Очистка сегментных регистров
     xor ax, ax
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
-   
+
     ; Настройка стека (moved above BSS to 0x510000)
     mov rsp, 0x510000
     mov rbp, rsp
-    
+
     ; Еще одно отладочное сообщение
     mov al, 'S'
     mov dx, 0x3f8
@@ -43,8 +50,35 @@ _start:
     mov dx, 0x3f8
     out dx, al
 
+    ; === CRITICAL DEBUG: Print parameters received from stage2 ===
+    mov al, '['
+    out dx, al
+    mov al, 'R'
+    out dx, al
+    mov al, 'S'
+    out dx, al
+    mov al, 'I'
+    out dx, al
+    mov al, '='
+    out dx, al
+    mov rax, r13               ; Get e820_count from R13
+    and al, 0x0F
+    cmp al, 10
+    jl .rsi_digit
+    add al, 'A' - 10
+    jmp .print_rsi
+.rsi_digit:
+    add al, '0'
+.print_rsi:
+    out dx, al
+    mov al, ']'
+    out dx, al
+    mov al, ' '
+    out dx, al
+
     ; === CRITICAL: Zero out BSS section ===
     ; All uninitialized global variables must be zeroed
+    ; NOTE: R12-R14 preserve our parameters automatically (callee-saved)
     mov rdi, __bss_start
     mov rcx, __bss_end
     sub rcx, rdi                ; RCX = size of BSS in bytes
@@ -57,10 +91,37 @@ _start:
     mov dx, 0x3f8
     out dx, al
 
-    ; Подготовка параметров для ядра (ПОСЛЕ очистки BSS!)
-    mov rdi, 0x500               ; Адрес e820 карты (обновлен с 0x90000)
-    movzx rsi, word [0x4FE]      ; Кол-во записей E820 (обновлен с 0x8FFE)
-    mov rdx, 0x100000            ; Начало доступной памяти (1MB)
+    ; === DEBUG: Print count again after BSS clear ===
+    mov al, '['
+    out dx, al
+    mov al, 'A'
+    out dx, al
+    mov al, 'F'
+    out dx, al
+    mov al, 'T'
+    out dx, al
+    mov al, '='
+    out dx, al
+    mov rax, r13               ; Still in R13!
+    and al, 0x0F
+    cmp al, 10
+    jl .aft_digit
+    add al, 'A' - 10
+    jmp .print_aft
+.aft_digit:
+    add al, '0'
+.print_aft:
+    out dx, al
+    mov al, ']'
+    out dx, al
+    mov al, ' '
+    out dx, al
+
+    ; === CRITICAL FIX: Restore parameters from R12-R14 to RDI-RDX ===
+    ; DO NOT read from memory! Use values passed from stage2!
+    mov rdi, r12               ; e820_map (was from stage2)
+    mov rsi, r13               ; e820_count (was from stage2)
+    mov rdx, r14               ; mem_start (was from stage2)
 
     ; call pick_user_experience
 

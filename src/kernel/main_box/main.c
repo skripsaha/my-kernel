@@ -61,26 +61,10 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     vga_init();
     kprintf("%[S]BoxOS Starting...%[D]\n");
 
-    // CRITICAL DEBUG: Print parameters IMMEDIATELY
-    // NOTE: Using %x instead of %d because %d doesn't work!
-    kprintf("\n[DEBUG] kernel_main parameters:\n");
-    kprintf("[DEBUG] e820_map pointer = %p\n", (void*)e820_map);
-    kprintf("[DEBUG] e820_count = 0x%x\n", (unsigned int)e820_count);
-    kprintf("[DEBUG] mem_start = %p\n", (void*)mem_start);
-
-    // CRITICAL: Read directly from 0x4FE to verify bootloader data
-    uint16_t* raw_count_ptr = (uint16_t*)0x4FE;
-    uint16_t raw_count = *raw_count_ptr;
-    kprintf("[DEBUG] Direct read from 0x4FE = 0x%x\n", (unsigned int)raw_count);
-
-    // Try to read first E820 entry directly from 0x500
-    e820_entry_t* raw_e820 = (e820_entry_t*)0x500;
-    kprintf("[DEBUG] First E820 entry at 0x500:\n");
-    kprintf("[DEBUG]   base = %p\n", (void*)raw_e820[0].base);
-    kprintf("[DEBUG]   length = %p\n", (void*)raw_e820[0].length);
-    kprintf("[DEBUG]   type = 0x%x\n", (unsigned int)raw_e820[0].type);
-
-    kprintf("%[H]Initializing core systems...%[D]\n\n");
+    // PRODUCTION: Clean initialization with parameters from bootloader
+    kprintf("\n%[H]Initializing core systems...%[D]\n");
+    kprintf("E820 memory map: %u entries received from bootloader\n", (unsigned int)e820_count);
+    kprintf("Available memory starts at: %p\n\n", (void*)mem_start);
 
     enable_fpu();
     kprintf("%[S] FPU enabled%[D]\n");
@@ -88,11 +72,9 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     mem_init();
     kprintf("%[S] Memory allocator initialized%[D]\n");
 
-    // Use E820 map from bootloader (passed via RDI/RSI)
-    kprintf("[DEBUG] Calling e820_set_entries(%p, 0x%x)\n", (void*)e820_map, (unsigned int)e820_count);
+    // Use E820 map from bootloader (passed via stage2 → kernel_entry → kernel_main)
     e820_set_entries(e820_map, e820_count);
-    kprintf("[DEBUG] e820_set_entries() completed\n");
-    kprintf("%[S] E820 map initialized (0x%x entries from bootloader)%[D]\n", (unsigned int)e820_count);
+    kprintf("%[S] E820 map initialized (%u entries from bootloader)%[D]\n", (unsigned int)e820_count);
 
     pmm_init();
     kprintf("%[S] Physical memory manager initialized%[D]\n");

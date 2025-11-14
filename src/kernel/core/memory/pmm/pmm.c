@@ -26,34 +26,22 @@ void pmm_init(void) {
         return;
     }
 
-    kprintf("[PMM] Fetching e820 memory map...\n");
+    kprintf("[PMM] Fetching e820 memory map from bootloader...\n");
     e820_entry_t* entries = memory_map_get_entries();
     size_t entry_count = memory_map_get_entry_count();
 
-    // CRITICAL DEBUG: Check raw E820 data (use %x not %d - %d is broken!)
-    kprintf("[PMM] entries pointer = %p\n", (void*)entries);
-    kprintf("[PMM] entry_count from e820.c = 0x%x\n", (unsigned int)entry_count);
-
-    // BUGFIX: Read count directly from bootloader location if e820.c failed
-    if (entry_count == 0) {
-        kprintf("[PMM] WARNING: e820.c reports 0 entries!\n");
-        kprintf("[PMM] Reading count directly from bootloader at 0x4FE...\n");
-        uint16_t* count_ptr = (uint16_t*)0x4FE;
-        entry_count = *count_ptr;
-        kprintf("[PMM] Count from 0x4FE = 0x%x\n", (unsigned int)entry_count);
-
-        if (entry_count > 0 && entry_count < 100) {  // Sanity check
-            entries = (e820_entry_t*)0x500;  // Read directly from bootloader location
-            kprintf("[PMM] Using E820 data directly from 0x500\n");
-        } else {
-            kprintf("[PMM] INVALID count from 0x4FE: 0x%x\n", (unsigned int)entry_count);
-            panic("[PMM] ERROR: e820 map is empty or corrupted!");
-        }
+    // Sanity check
+    if (entry_count == 0 || entries == NULL) {
+        panic("[PMM] CRITICAL: E820 map is empty! Bootloader failed to detect memory!");
     }
 
-    kprintf("[PMM] Total e820 entries: 0x%x\n", (unsigned int)entry_count);
+    if (entry_count > 100) {
+        kprintf("[PMM] WARNING: Suspiciously high entry count (%u), possible corruption\n", (unsigned int)entry_count);
+    }
 
-    // Print all entries for debug (use %x not %d - %d is broken!)
+    kprintf("[PMM] Total e820 entries: %u\n", (unsigned int)entry_count);
+
+    // Print all entries for debug
     for (size_t i = 0; i < entry_count && i < 20; i++) {  // Limit to 20 to avoid spam
         // Split 64-bit values into 32-bit parts for printing
         uint32_t base_low = (uint32_t)(entries[i].base & 0xFFFFFFFF);
@@ -61,18 +49,18 @@ void pmm_init(void) {
         uint32_t len_low = (uint32_t)(entries[i].length & 0xFFFFFFFF);
         uint32_t len_high = (uint32_t)(entries[i].length >> 32);
 
-        kprintf("  E820[0x%x]: base=0x%x%08x len=0x%x%08x type=0x%x\n",
+        kprintf("  E820[%u]: base=0x%x%08x len=0x%x%08x type=%u\n",
                 (unsigned int)i, base_high, base_low, len_high, len_low, (unsigned int)entries[i].type);
     }
 
     // Find the highest usable RAM address
     uintptr_t mem_end = 0;
-    kprintf("[PMM] Scanning for USABLE RAM (type=0x%x)...\n", (unsigned int)E820_USABLE);
+    kprintf("[PMM] Scanning for USABLE RAM (type=%u)...\n", (unsigned int)E820_USABLE);
 
     for (size_t i = 0; i < entry_count; i++) {
         if (entries[i].type == E820_USABLE && entries[i].length > 0) {
             uintptr_t region_end = entries[i].base + entries[i].length;
-            kprintf("[PMM] Entry 0x%x: USABLE from %p to %p\n",
+            kprintf("[PMM] Entry %u: USABLE from %p to %p\n",
                     (unsigned int)i, (void*)entries[i].base, (void*)region_end);
             if (region_end > mem_end) {
                 mem_end = region_end;
@@ -121,18 +109,13 @@ void pmm_init(void) {
     // Place bitmap at the end of RAM
     // pmm_zone.bitmap = (uint8_t*)(mem_end - bitmap_size);
     // kprintf("[PMM] Bitmap placed at %p\n", pmm_zone.bitmap);
-    kprintf("[PMM] DEBUG: About to place bitmap after kernel_end\n");
-    kprintf("[PMM] DEBUG: &_kernel_end = %p\n", (void*)&_kernel_end);
-
     pmm_zone.bitmap = (uint8_t*)ALIGN_UP((uintptr_t)&_kernel_end, 4096);
-    kprintf("[PMM] Bitmap placed at %p (after kernel)\n", pmm_zone.bitmap);
+    kprintf("[PMM] Bitmap placed at %p (after kernel, %zu KB)\n", pmm_zone.bitmap, bitmap_size / 1024);
 
     // Ensure the bitmap is within managed range
     if ((uintptr_t)pmm_zone.bitmap < pmm_zone.base) {
         panic("[PMM] ERROR: Bitmap is outside managed memory!");
     }
-
-    kprintf("[PMM] DEBUG: About to memset bitmap (%zu bytes)...\n", bitmap_size);
 
     // BUGFIX: Add sanity check before memset to prevent hang
     if (bitmap_size > 100 * 1024 * 1024) {  // 100MB sanity limit
@@ -142,10 +125,7 @@ void pmm_init(void) {
 
     // Mark all pages as used (safe default)
     memset(pmm_zone.bitmap, 0xFF, bitmap_size);
-    kprintf("[PMM] DEBUG: memset completed successfully\n");
-
-    // Free all usable regions from e820 (except below 1MB)
-    kprintf("[PMM] DEBUG: Freeing usable regions from e820...\n");
+    kprintf("[PMM] Bitmap initialized, marking usable regions...\n");
     for (size_t i = 0; i < entry_count; i++) {
         if (entries[i].type == E820_USABLE && entries[i].length > 0) {
             uintptr_t start = entries[i].base;
