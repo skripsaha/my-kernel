@@ -214,20 +214,28 @@ void* pmm_alloc_zero(size_t pages) {
 
 void pmm_free(void* addr, size_t pages) {
     if (!addr || !pages || !pmm_initialized) return;
-    
+
     uintptr_t base = (uintptr_t)addr;
     if (base < pmm_zone.base || base >= pmm_zone.base + pmm_zone.pages * PMM_PAGE_SIZE) {
-        panic("PMM: Invalid free address %p", addr);
+        // PRODUCTION FIX: Warn instead of panic for invalid free
+        kprintf("[PMM] ERROR: Invalid free address %p (outside managed range 0x%p-0x%p)\n",
+                addr, (void*)pmm_zone.base,
+                (void*)(pmm_zone.base + pmm_zone.pages * PMM_PAGE_SIZE));
+        return;  // Return safely instead of panic
     }
-    
+
     size_t first = (base - pmm_zone.base) / PMM_PAGE_SIZE;
-    
+
     spin_lock(&pmm_zone.lock);
-    
-    // Проверка на двойное освобождение
+
+    // Проверка на двойное освобождение (PRODUCTION FIX: warn instead of panic)
     for (size_t i = first; i < first + pages; i++) {
         if (pmm_get_bit(i) == PMM_FRAME_FREE) {
-            panic("PMM: Double free detected at page %d", i);
+            spin_unlock(&pmm_zone.lock);
+            kprintf("[PMM] ERROR: Double free detected at page %zu (address %p)\n",
+                    i, addr);
+            kprintf("[PMM] This is a serious bug - please check the caller!\n");
+            return;  // Return safely to prevent corruption
         }
     }
     

@@ -190,7 +190,7 @@ typedef struct {
 // ============================================================================
 
 void tagfs_init(void);
-void tagfs_format(uint64_t total_blocks);  // Форматирование новой ФС
+int tagfs_format(uint64_t total_blocks);  // Форматирование новой ФС (returns 0 on success, -1 on error)
 
 // ============================================================================
 // DISK PERSISTENCE - Синхронизация с диском
@@ -198,6 +198,9 @@ void tagfs_format(uint64_t total_blocks);  // Форматирование но�
 
 // Включить режим работы с диском (0 = память, 1 = диск)
 void tagfs_set_disk_mode(int enable);
+
+// PRODUCTION: Graceful shutdown with filesystem sync
+void tagfs_shutdown(void);
 
 // Синхронизировать всю ФС на диск
 int tagfs_sync(void);

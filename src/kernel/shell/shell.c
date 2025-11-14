@@ -775,7 +775,12 @@ int cmd_reboot(int argc, char** argv) {
         return -1;
     }
 
-    kprintf("\n%[W]Rebooting system...%[D]\n\n");
+    kprintf("\n%[W]Rebooting system...%[D]\n");
+
+    // PRODUCTION: Sync filesystem before reboot
+    tagfs_shutdown();
+
+    kprintf("\n%[W]Initiating reboot...%[D]\n\n");
 
     // Wait a moment
     for (volatile int i = 0; i < REBOOT_DELAY_CYCLES; i++);
@@ -805,7 +810,12 @@ int cmd_byebye(int argc, char** argv) {
     }
 
     kprintf("\n%[H]Thank you for using BoxOS, %s!%[D]\n", current_user);
-    kprintf("%[S]Shutting down...%[D]\n\n");
+    kprintf("%[S]Shutting down system...%[D]\n");
+
+    // PRODUCTION: Sync filesystem before shutdown
+    tagfs_shutdown();
+
+    kprintf("\n%[S]Powering off...%[D]\n\n");
 
     // Wait a moment
     for (volatile int i = 0; i < SHUTDOWN_DELAY_CYCLES; i++);
