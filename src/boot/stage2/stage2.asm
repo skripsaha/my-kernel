@@ -206,6 +206,17 @@ long_mode_start:
     mov [BOOT_INFO_ADDR+8], dword KERNEL_LOAD_ADDR ; Kernel load address
     mov [BOOT_INFO_ADDR+12], dword KERNEL_END_ADDR ; Kernel end address
 
+    ; === CRITICAL DEBUG: Signal BEFORE jumping to kernel ===
+    mov dx, 0x3f8
+    mov al, 'J'   ; "J" = About to Jump
+    out dx, al
+    mov al, 'M'   ; "JM" = Jump to Main
+    out dx, al
+    mov al, 'P'   ; "JMP"
+    out dx, al
+    mov al, ' '
+    out dx, al
+
     ; Jump to kernel entry point
     ; IMPORTANT: RDI, RSI, RDX must be preserved until kernel_main() is called!
     jmp KERNEL_LOAD_ADDR

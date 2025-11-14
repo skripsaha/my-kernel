@@ -18,6 +18,11 @@ global hide_cursor
 global user_experience_level
 
 _start:
+    ; === CRITICAL DEBUG: VERY FIRST INSTRUCTION - Signal we entered kernel! ===
+    mov al, '!'   ; '!' = KERNEL ENTRY REACHED!
+    mov dx, 0x3f8
+    out dx, al
+
     ; === CRITICAL FIX: Save parameters from stage2 IMMEDIATELY! ===
     ; stage2 passes: RDI=e820_map, RSI=e820_count, RDX=mem_start
     ; Use callee-saved registers R12-R14 to preserve across stack/BSS operations

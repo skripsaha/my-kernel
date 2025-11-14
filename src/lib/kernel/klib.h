@@ -19,7 +19,7 @@ extern uintptr_t _kernel_start;
 #define ALIGN_DOWN(addr, align) ((addr) & ~((align) - 1))
 
 // ========== Конфигурация ==========
-#define KLIB_MEMORY_POOL_SIZE (1024 * 1024) // 1MB
+#define KLIB_MEMORY_POOL_SIZE (64 * 1024) // 64KB (REDUCED from 1MB to fix BSS!)
 
 //QUESTION как настроить это правильно?
 #define KLIB_BLOCK_ALIGNMENT  32 //BUG: ЕСЛИ СНОВА ПОСТАВИТЬ 16 КАК БЫЛО ТО General page fault при команде ls!!! (почему?)
