@@ -2,6 +2,7 @@
 #include "pmm.h"
 #include "klib.h"
 #include "io.h"
+#include "e820.h"
 
 
 // ========== GLOBAL VARIABLES ==========
@@ -868,24 +869,77 @@ void vmm_init(void) {
     kprintf("[VMM] Kernel context created at %p\n", kernel_context);
     kprintf("[VMM] PML4 physical address: 0x%p\n", (void*)kernel_context->pml4_phys);
 
-    // Set up identity mapping for first 256MB
-    // CRITICAL: VMM relies on physical = virtual for page table access!
-    // PMM can allocate memory anywhere in physical RAM, so we need enough
-    // identity mapping to cover all possible allocations.
-    // 256MB should be sufficient for QEMU with 512MB RAM
-    kprintf("[VMM] Setting up identity mapping for first 256MB (CRITICAL for VMM)...\n");
+    // PRODUCTION FIX: Identity map ALL physical RAM (not just 256MB!)
+    // OLD BUG: Only mapped first 256MB, causing crashes on machines with more RAM
+    // NEW: Dynamically detect total RAM from E820 and map everything
+
+    kprintf("[VMM] Setting up identity mapping for ALL physical RAM...\n");
+
+    // Get E820 memory map to find actual RAM size
+    e820_entry_t* e820_entries = memory_map_get_entries();
+    size_t e820_count = memory_map_get_entry_count();
+
+    // Find maximum physical address from E820
+    uintptr_t max_phys_addr = 0;
+    kprintf("[VMM] Scanning E820 map for physical memory bounds...\n");
+
+    for (size_t i = 0; i < e820_count; i++) {
+        if (e820_entries[i].type == E820_USABLE && e820_entries[i].length > 0) {
+            uintptr_t region_end = e820_entries[i].base + e820_entries[i].length;
+            if (region_end > max_phys_addr) {
+                max_phys_addr = region_end;
+                kprintf("[VMM]   Found RAM: 0x%p - 0x%p (%lu MB)\n",
+                       (void*)e820_entries[i].base,
+                       (void*)region_end,
+                       (e820_entries[i].length) / (1024 * 1024));
+            }
+        }
+    }
+
+    // Safety cap at 4GB for 32-bit addressing concerns
+    if (max_phys_addr > 0x100000000ULL) {  // 4GB
+        kprintf("[VMM] WARNING: Physical RAM exceeds 4GB (0x%p), capping at 4GB\n",
+               (void*)max_phys_addr);
+        max_phys_addr = 0x100000000ULL;
+    }
+
+    // Minimum 512MB even if E820 reports less (safety)
+    if (max_phys_addr < 0x20000000) {  // 512MB
+        kprintf("[VMM] WARNING: E820 reported only 0x%p, using 512MB minimum\n",
+               (void*)max_phys_addr);
+        max_phys_addr = 0x20000000;
+    }
+
+    kprintf("[VMM] Total physical RAM to identity map: 0x%p (%lu MB)\n",
+           (void*)max_phys_addr, max_phys_addr / (1024 * 1024));
+
+    // Now create identity mapping for ALL physical RAM
     size_t identity_pages = 0;
-    for (uintptr_t addr = 0; addr < 0x10000000; addr += VMM_PAGE_SIZE) { // 256MB
+    size_t failed_pages = 0;
+
+    for (uintptr_t addr = 0; addr < max_phys_addr; addr += VMM_PAGE_SIZE) {
         vmm_map_result_t result = vmm_map_page(kernel_context, addr, addr, VMM_FLAGS_KERNEL_RW);
         if (result.success) {
             identity_pages++;
-        } else if (addr < 0x1000000) { // First 16MB is critical
-            kprintf("[VMM] CRITICAL: Failed to identity map 0x%p: %s\n",
-                   (void*)addr, result.error_msg);
+        } else {
+            failed_pages++;
+            // Only critical if in first 16MB (kernel/bootloader region)
+            if (addr < 0x1000000) {
+                kprintf("[VMM] CRITICAL: Failed to identity map 0x%p: %s\n",
+                       (void*)addr, result.error_msg);
+            }
+        }
+
+        // Progress indicator every 64MB
+        if ((addr % 0x4000000) == 0 && addr > 0) {
+            kprintf("[VMM]   Mapped up to %lu MB...\n", addr / (1024 * 1024));
         }
     }
-    kprintf("[VMM] Identity mapped %zu pages (0x%p bytes)\n",
-           identity_pages, (void*)(identity_pages * VMM_PAGE_SIZE));
+
+    kprintf("[VMM] Identity mapping complete:\n");
+    kprintf("[VMM]   - Successfully mapped: %zu pages (%zu MB)\n",
+           identity_pages, (identity_pages * VMM_PAGE_SIZE) / (1024 * 1024));
+    kprintf("[VMM]   - Failed to map: %zu pages\n", failed_pages);
 
     kprintf("[VMM] Kernel heap will be mapped on demand starting at 0x%p\n",
            (void*)VMM_KERNEL_HEAP_BASE);
