@@ -861,20 +861,56 @@ char* strcpy(char* dest, const char* src) {
 }
 
 char* strncpy(char* dest, const char* src, size_t n) {
-    char* ret = dest;
-    while (n-- && (*dest++ = *src++));
-    while (n-- > 0) *dest++ = '\0';
-    return ret;
+    // FIXED: Proper null-termination handling
+    if (n == 0) return dest;
+
+    size_t i;
+    // Copy characters from src to dest
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        dest[i] = src[i];
+    }
+    // Pad remaining space with null bytes
+    for (; i < n; i++) {
+        dest[i] = '\0';
+    }
+
+    return dest;
 }
 
 int strcmp(const char* s1, const char* s2) {
-    while (*s1 && (*s1 == *s2)) s1++, s2++;
-    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+    // FIXED: Prevent integer overflow in comparison
+    while (*s1 && (*s1 == *s2)) {
+        s1++;
+        s2++;
+    }
+
+    unsigned char c1 = *(const unsigned char*)s1;
+    unsigned char c2 = *(const unsigned char*)s2;
+
+    // Return -1, 0, or 1 (standard behavior without overflow)
+    if (c1 < c2) return -1;
+    if (c1 > c2) return 1;
+    return 0;
 }
 
 int strncmp(const char* s1, const char* s2, size_t n) {
-    while (n-- && *s1 && (*s1 == *s2)) s1++, s2++;
-    return n == SIZE_MAX ? 0 : *(const unsigned char*)s1 - *(const unsigned char*)s2;
+    // FIXED: Prevent overflow and handle edge cases
+    if (n == 0) return 0;
+
+    while (n > 0 && *s1 && (*s1 == *s2)) {
+        s1++;
+        s2++;
+        n--;
+    }
+
+    if (n == 0) return 0;
+
+    unsigned char c1 = *(const unsigned char*)s1;
+    unsigned char c2 = *(const unsigned char*)s2;
+
+    if (c1 < c2) return -1;
+    if (c1 > c2) return 1;
+    return 0;
 }
 
 char* strchr(const char* s, int c) {
