@@ -123,6 +123,9 @@ void keyboard_handle_scancode(uint8_t scancode) {
 // ============================================================================
 
 int keyboard_has_input(void) {
+    // SAFETY: Use volatile read with memory barrier to prevent race conditions
+    // between IRQ handler (writer) and shell (reader)
+    __sync_synchronize();  // Memory barrier
     return kb_head != kb_tail;
 }
 
