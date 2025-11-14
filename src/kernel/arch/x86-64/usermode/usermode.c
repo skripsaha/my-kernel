@@ -115,7 +115,7 @@ Task* usermode_create_task(const char* name, void* entry_point,
 
 uint64_t usermode_create_page_table(void) {
     // Allocate PML4 (top-level page table)
-    void* pml4 = pmm_alloc_frame();
+    void* pml4 = pmm_alloc(1);  // Allocate 1 page
     if (!pml4) {
         kprintf("[USERMODE] ERROR: Failed to allocate PML4\n");
         return 0;
@@ -154,7 +154,7 @@ void* usermode_create_stack(uint64_t page_table, uint64_t size) {
     // Allocate physical frames for stack
     size_t pages = (size + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
 
-    void* stack_phys = pmm_alloc_frame();
+    void* stack_phys = pmm_alloc(pages);  // Allocate required pages
     if (!stack_phys) {
         return NULL;
     }

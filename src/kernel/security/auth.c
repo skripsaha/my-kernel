@@ -1,5 +1,6 @@
 #include "auth.h"
 #include "pit.h"  // For random seed from timer
+#include "atomics.h"  // For rdtsc()
 
 // ============================================================================
 // USER DATABASE
