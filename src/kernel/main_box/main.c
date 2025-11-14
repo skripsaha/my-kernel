@@ -16,6 +16,7 @@
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
 #include "event_ipc.h"
+#include "event_ipc_demo.h"
 #include "auth.h"
 #include "shell.h"
 #include "serial.h"
@@ -183,6 +184,9 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     kprintf("\n%[H]=== Running Event-Driven System Demo === %[D]\n");
     eventdriven_demo_run();
     kprintf("%[S] Demo completed!%[D]\n");
+
+    // === EVENT-BASED IPC DEMONSTRATION ===
+    event_ipc_demo_run();
 
     // === SHELL INITIALIZATION ===
     kprintf("\n%[H]=== Starting BoxOS Shell ===%[D]\n\n");
