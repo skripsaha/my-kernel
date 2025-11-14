@@ -67,8 +67,17 @@ void pmm_init(void) {
 
     // PMM will manage memory starting from 1MB (0x100000)
     pmm_zone.base = 0x100000;
+
+    // BUGFIX: Prevent underflow if mem_end < pmm_zone.base
+    if (mem_end <= pmm_zone.base) {
+        kprintf("[PMM] ERROR: mem_end (0x%p) <= pmm_zone.base (0x%p)\n",
+                (void*)mem_end, (void*)pmm_zone.base);
+        panic("[PMM] ERROR: Not enough usable RAM above 1MB!");
+    }
+
     pmm_zone.pages = (mem_end - pmm_zone.base) / PMM_PAGE_SIZE;
-    kprintf("[PMM] Managing pages from 0x%p, total pages = %d\n", (void*)pmm_zone.base, (int)pmm_zone.pages);
+    kprintf("[PMM] Managing pages from 0x%p, total pages = %zu\n",
+            (void*)pmm_zone.base, pmm_zone.pages);
 
     if (pmm_zone.pages == 0) {
         panic("[PMM] ERROR: No usable pages!");
@@ -76,11 +85,24 @@ void pmm_init(void) {
 
     // Bitmap size (1 bit per page)
     size_t bitmap_size = (pmm_zone.pages + 7) / 8;
-    kprintf("[PMM] Bitmap size = %d bytes\n", (int)bitmap_size);
+    kprintf("[PMM] Bitmap size = %zu bytes (%zu KB)\n",
+            bitmap_size, bitmap_size / 1024);
+
+    // BUGFIX: Sanity check on bitmap size (prevent huge allocations)
+    size_t max_bitmap_size = 16 * 1024 * 1024; // 16MB max (handles up to 512GB RAM)
+    if (bitmap_size > max_bitmap_size) {
+        kprintf("[PMM] WARNING: Bitmap too large (%zu bytes), capping at %zu bytes\n",
+                bitmap_size, max_bitmap_size);
+        bitmap_size = max_bitmap_size;
+        pmm_zone.pages = bitmap_size * 8; // Recalculate pages
+    }
 
     // Place bitmap at the end of RAM
     // pmm_zone.bitmap = (uint8_t*)(mem_end - bitmap_size);
     // kprintf("[PMM] Bitmap placed at %p\n", pmm_zone.bitmap);
+    kprintf("[PMM] DEBUG: About to place bitmap after kernel_end\n");
+    kprintf("[PMM] DEBUG: &_kernel_end = %p\n", (void*)&_kernel_end);
+
     pmm_zone.bitmap = (uint8_t*)ALIGN_UP((uintptr_t)&_kernel_end, 4096);
     kprintf("[PMM] Bitmap placed at %p (after kernel)\n", pmm_zone.bitmap);
 
@@ -89,10 +111,20 @@ void pmm_init(void) {
         panic("[PMM] ERROR: Bitmap is outside managed memory!");
     }
 
+    kprintf("[PMM] DEBUG: About to memset bitmap (%zu bytes)...\n", bitmap_size);
+
+    // BUGFIX: Add sanity check before memset to prevent hang
+    if (bitmap_size > 100 * 1024 * 1024) {  // 100MB sanity limit
+        kprintf("[PMM] ERROR: Refusing to memset %zu bytes (too large!)\n", bitmap_size);
+        panic("[PMM] ERROR: Bitmap size unreasonable!");
+    }
+
     // Mark all pages as used (safe default)
     memset(pmm_zone.bitmap, 0xFF, bitmap_size);
+    kprintf("[PMM] DEBUG: memset completed successfully\n");
 
     // Free all usable regions from e820 (except below 1MB)
+    kprintf("[PMM] DEBUG: Freeing usable regions from e820...\n");
     for (size_t i = 0; i < entry_count; i++) {
         if (entries[i].type == E820_USABLE && entries[i].length > 0) {
             uintptr_t start = entries[i].base;
@@ -105,27 +137,53 @@ void pmm_init(void) {
             size_t end_page = (end - pmm_zone.base) / PMM_PAGE_SIZE;
             if (end_page > pmm_zone.pages) end_page = pmm_zone.pages;
 
-            kprintf("[PMM] Freeing pages: %d .. %d\n", (int)start_page, (int)end_page - 1);
+            size_t pages_to_free = end_page - start_page;
+            kprintf("[PMM] Freeing %zu pages: %zu .. %zu (0x%p - 0x%p)\n",
+                    pages_to_free, start_page, end_page - 1, (void*)start, (void*)end);
 
+            // BUGFIX: Prevent hang on huge page ranges
+            if (pages_to_free > 10000000) {  // 10 million pages = 40GB
+                kprintf("[PMM] WARNING: Huge page range (%zu pages), skipping!\n", pages_to_free);
+                continue;
+            }
+
+            // Show progress for large ranges
             for (size_t j = start_page; j < end_page; j++) {
                 pmm_set_bit(j, PMM_FRAME_FREE);
+                // Progress indicator for large ranges (every 100k pages)
+                if (pages_to_free > 100000 && (j - start_page) % 100000 == 0) {
+                    kprintf("[PMM] Progress: %zu / %zu pages freed\n",
+                            j - start_page, pages_to_free);
+                }
             }
+            kprintf("[PMM] Freed %zu pages successfully\n", pages_to_free);
         }
     }
+    kprintf("[PMM] DEBUG: Finished freeing e820 regions\n");
 
     // Optionally, reserve kernel and bitmap here, if you have _kernel_start/_kernel_end
     extern uintptr_t _kernel_start;
     extern uintptr_t _kernel_end;
+
+    kprintf("[PMM] DEBUG: Reserving kernel region 0x%p - 0x%p\n",
+            (void*)&_kernel_start, (void*)&_kernel_end);
     pmm_reserve_region((uintptr_t)&_kernel_start, (uintptr_t)&_kernel_end, "Kernel");
+
+    kprintf("[PMM] DEBUG: Reserving bitmap region 0x%p - 0x%p (%zu bytes)\n",
+            (void*)pmm_zone.bitmap, (void*)(pmm_zone.bitmap + bitmap_size), bitmap_size);
     pmm_reserve_region((uintptr_t)pmm_zone.bitmap, (uintptr_t)pmm_zone.bitmap + bitmap_size, "Bitmap");
 
+    kprintf("[PMM] DEBUG: Initializing spinlock\n");
     spinlock_init(&pmm_zone.lock);
+
+    kprintf("[PMM] DEBUG: Setting pmm_initialized = true\n");
     pmm_initialized = true;
 
-    kprintf("[PMM] Initialized: %d MB available, %d pages.\n",
-        (int)((pmm_zone.pages * PMM_PAGE_SIZE) / (1024 * 1024)),
-        (int)pmm_zone.pages
+    kprintf("[PMM] Initialized: %zu MB available, %zu pages.\n",
+        (pmm_zone.pages * PMM_PAGE_SIZE) / (1024 * 1024),
+        pmm_zone.pages
     );
+    kprintf("[PMM] DEBUG: pmm_init() completed successfully!\n");
 }
 
 
@@ -259,6 +317,21 @@ static void pmm_reserve_region(uintptr_t base, uintptr_t end, const char* name) 
 
     if (base >= end) return;
 
+    // BUGFIX: Check if region is below PMM management zone to prevent underflow
+    if (end <= pmm_zone.base) {
+        kprintf("[PMM] Skipping %s reservation (0x%p-0x%p): below PMM zone (0x%p)\n",
+                name, (void*)base, (void*)end, (void*)pmm_zone.base);
+        return;
+    }
+
+    // Adjust base if it starts below PMM zone
+    if (base < pmm_zone.base) {
+        kprintf("[PMM] Adjusting %s base from 0x%p to 0x%p (PMM zone start)\n",
+                name, (void*)base, (void*)pmm_zone.base);
+        base = pmm_zone.base;
+    }
+
+    // Now safe to calculate page numbers (no underflow possible)
     size_t start_page = (base - pmm_zone.base) / PMM_PAGE_SIZE;
     size_t end_page = (end - pmm_zone.base) / PMM_PAGE_SIZE;
 
@@ -266,11 +339,15 @@ static void pmm_reserve_region(uintptr_t base, uintptr_t end, const char* name) 
     if (start_page >= pmm_zone.pages) return; // Регион начинается за пределами зоны PMM
     if (end_page > pmm_zone.pages) end_page = pmm_zone.pages; // Регион выходит за пределы зоны PMM
 
+    kprintf("[PMM] Reserving %s: pages %zu-%zu (0x%p-0x%p)\n",
+            name, start_page, end_page - 1, (void*)base, (void*)end);
+
     for (size_t i = start_page; i < end_page; i++) {
         pmm_set_bit(i, PMM_FRAME_RESERVED); // Пометить как занятое (1)
     }
 
-    kprintf("PMM: Reserved %s at %p-%p\n", name, (void*)base, (void*)end);
+    kprintf("[PMM] Reserved %s at %p-%p (%zu pages)\n",
+            name, (void*)base, (void*)end, end_page - start_page);
 }
 
 static void pmm_set_bit(size_t bit, pmm_frame_state_t state) {
