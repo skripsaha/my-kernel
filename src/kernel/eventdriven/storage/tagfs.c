@@ -8,14 +8,12 @@
 
 TagFSContext global_tagfs;
 
-// PRODUCTION FIX: Dynamic block storage instead of static array
-// Old bug: claimed 512MB but was only 512KB (128 * 4KB = 512KB not MB!)
-#define TAGFS_MEM_BLOCKS_DEFAULT 128  // 512KB default (128 * 4KB)
-#define TAGFS_MEM_BLOCKS_MAX     32768 // 128MB max for RAM mode (32768 * 4KB)
+// PRODUCTION FIX: Use reasonable default size for RAM storage
+// 128 blocks * 4KB = 512KB (not 512MB as old comment incorrectly claimed)
+#define TAGFS_MEM_BLOCKS 128  // 512KB of RAM storage for superblock, inodes, etc.
 
-// Dynamic storage pointer (allocated at runtime based on available memory)
-static uint8_t** tagfs_storage = NULL;
-static uint64_t tagfs_storage_blocks = 0;
+// Static storage array (used for superblock and metadata even in disk mode)
+static uint8_t tagfs_storage[TAGFS_MEM_BLOCKS][TAGFS_BLOCK_SIZE];
 
 // PRODUCTION FIX: Default to disk mode if available, RAM as fallback
 static int use_disk = 1;  // 1 = disk (default), 0 = RAM fallback
@@ -46,64 +44,6 @@ static uint64_t bitmap_find_free(uint8_t* bitmap, uint64_t max_bits) {
     return (uint64_t)-1;  // Не найдено
 }
 
-// ============================================================================
-// DYNAMIC STORAGE MANAGEMENT - PRODUCTION
-// ============================================================================
-
-// Initialize dynamic storage for RAM mode
-static int tagfs_init_storage(uint64_t num_blocks) {
-    if (num_blocks > TAGFS_MEM_BLOCKS_MAX) {
-        kprintf("[TAGFS] WARNING: Requested %lu blocks exceeds max %u, capping\n",
-                num_blocks, TAGFS_MEM_BLOCKS_MAX);
-        num_blocks = TAGFS_MEM_BLOCKS_MAX;
-    }
-
-    kprintf("[TAGFS] Allocating dynamic storage: %lu blocks (%lu MB)\n",
-            num_blocks, (num_blocks * TAGFS_BLOCK_SIZE) / (1024 * 1024));
-
-    // Allocate array of pointers
-    tagfs_storage = (uint8_t**)kmalloc(num_blocks * sizeof(uint8_t*));
-    if (!tagfs_storage) {
-        kprintf("[TAGFS] ERROR: Failed to allocate storage pointer array\n");
-        return -1;
-    }
-
-    // Allocate each block
-    for (uint64_t i = 0; i < num_blocks; i++) {
-        tagfs_storage[i] = (uint8_t*)kmalloc(TAGFS_BLOCK_SIZE);
-        if (!tagfs_storage[i]) {
-            kprintf("[TAGFS] ERROR: Failed to allocate block %lu\n", i);
-            // Free already allocated blocks
-            for (uint64_t j = 0; j < i; j++) {
-                kfree(tagfs_storage[j]);
-            }
-            kfree(tagfs_storage);
-            tagfs_storage = NULL;
-            return -1;
-        }
-        memset(tagfs_storage[i], 0, TAGFS_BLOCK_SIZE);
-    }
-
-    tagfs_storage_blocks = num_blocks;
-    kprintf("[TAGFS] Storage allocated successfully: %lu blocks\n", num_blocks);
-    return 0;
-}
-
-// Free dynamic storage
-static void tagfs_free_storage(void) {
-    if (!tagfs_storage) return;
-
-    kprintf("[TAGFS] Freeing storage: %lu blocks\n", tagfs_storage_blocks);
-
-    for (uint64_t i = 0; i < tagfs_storage_blocks; i++) {
-        if (tagfs_storage[i]) {
-            kfree(tagfs_storage[i]);
-        }
-    }
-    kfree(tagfs_storage);
-    tagfs_storage = NULL;
-    tagfs_storage_blocks = 0;
-}
 
 // ============================================================================
 // DISK I/O - Чтение/запись блоков с диска или из памяти
@@ -111,24 +51,18 @@ static void tagfs_free_storage(void) {
 
 // PRODUCTION: Read block from disk OR memory cache
 static int tagfs_read_block_raw(uint64_t block_num, uint8_t* buffer) {
-    // Bounds check
     if (use_disk) {
-        // Disk mode - no bounds on storage array needed
+        // Disk mode - read from physical disk
         return ata_read_block(block_num, buffer);
     } else {
-        // RAM mode - check bounds
-        if (block_num >= tagfs_storage_blocks) {
-            kprintf("[TAGFS] ERROR: Block %lu out of bounds (max %lu)\n",
-                    block_num, tagfs_storage_blocks);
+        // RAM mode - check bounds against static array size
+        if (block_num >= TAGFS_MEM_BLOCKS) {
+            kprintf("[TAGFS] ERROR: Block %lu out of bounds (max %u)\n",
+                    block_num, TAGFS_MEM_BLOCKS);
             return -1;
         }
 
-        if (!tagfs_storage || !tagfs_storage[block_num]) {
-            kprintf("[TAGFS] ERROR: Storage not initialized for block %lu\n", block_num);
-            return -1;
-        }
-
-        // Copy from RAM
+        // Copy from RAM storage
         memcpy(buffer, tagfs_storage[block_num], TAGFS_BLOCK_SIZE);
         return 0;
     }
@@ -140,19 +74,14 @@ static int tagfs_write_block_raw(uint64_t block_num, const uint8_t* buffer) {
         // PRODUCTION: Write directly to disk (persistent!)
         return ata_write_block(block_num, buffer);
     } else {
-        // RAM mode - check bounds
-        if (block_num >= tagfs_storage_blocks) {
-            kprintf("[TAGFS] ERROR: Block %lu out of bounds (max %lu)\n",
-                    block_num, tagfs_storage_blocks);
+        // RAM mode - check bounds against static array size
+        if (block_num >= TAGFS_MEM_BLOCKS) {
+            kprintf("[TAGFS] ERROR: Block %lu out of bounds (max %u)\n",
+                    block_num, TAGFS_MEM_BLOCKS);
             return -1;
         }
 
-        if (!tagfs_storage || !tagfs_storage[block_num]) {
-            kprintf("[TAGFS] ERROR: Storage not initialized for block %lu\n", block_num);
-            return -1;
-        }
-
-        // Copy to RAM
+        // Copy to RAM storage
         memcpy(tagfs_storage[block_num], buffer, TAGFS_BLOCK_SIZE);
         return 0;
     }
@@ -260,12 +189,12 @@ int tagfs_sync(void) {
     // 3. Sync data blocks (only modified blocks in RAM mode, or use write-through in disk mode)
     // In pure disk mode, data is already on disk (write-through)
     // In RAM mode with dirty tracking, sync dirty blocks
-    if (!use_disk && tagfs_storage) {
+    if (!use_disk) {
         uint64_t data_start = global_tagfs.superblock->data_blocks_start;
         uint64_t total_blocks = global_tagfs.superblock->total_blocks;
 
-        if (total_blocks > tagfs_storage_blocks) {
-            total_blocks = tagfs_storage_blocks;
+        if (total_blocks > TAGFS_MEM_BLOCKS) {
+            total_blocks = TAGFS_MEM_BLOCKS;
         }
 
         kprintf("[TAGFS] Syncing data blocks (%lu-%lu)...\n", data_start, total_blocks - 1);
