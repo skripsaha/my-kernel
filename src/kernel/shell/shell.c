@@ -461,13 +461,19 @@ int cmd_create(int argc, char** argv) {
         }
     }
 
-    // Create file
+    // Create file with INNOVATIVE CAPABILITIES!
+    // TODO: Use actual user_id from current session (for now: wizard = 0)
+    uint32_t owner_id = 0;  // The Wizard
+    uint32_t capabilities = TAGFS_CAP_DEFAULT;  // read + write
+    uint8_t access_scope = TAGFS_ACCESS_PUBLIC;  // Everyone can access for now
+
     uint64_t inode_id;
     if (data) {
         inode_id = tagfs_create_file_with_data(tags, tag_count,
-                                                (const uint8_t*)data, strlen(data));
+                                                (const uint8_t*)data, strlen(data),
+                                                owner_id, capabilities, access_scope);
     } else {
-        inode_id = tagfs_create_file(tags, tag_count);
+        inode_id = tagfs_create_file(tags, tag_count, owner_id, capabilities, access_scope);
     }
 
     if (inode_id == TAGFS_INVALID_INODE) {

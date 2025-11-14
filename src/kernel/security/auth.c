@@ -111,6 +111,10 @@ int auth_add_user(const char* username, const char* password, int is_admin) {
     UserCredentials* user = &user_db[user_count];
     memset(user, 0, sizeof(UserCredentials));
 
+    // Assign user_id (0 = root, 1+ = normal users)
+    user->user_id = (strcmp(username, "root") == 0) ? 0 : (user_count + 1000);
+    user->group_id = user->user_id;  // Default: primary group = user_id
+
     strncpy(user->username, username, AUTH_USERNAME_MAX - 1);
     user->username[AUTH_USERNAME_MAX - 1] = '\0';
 
@@ -278,4 +282,103 @@ void auth_unlock_account(const char* username) {
     }
 
     spin_unlock(&auth_lock);
+}
+
+// ============================================================================
+// SESSION MANAGEMENT
+// ============================================================================
+
+UserSession* auth_create_session(const char* username) {
+    if (!username) return NULL;
+
+    spin_lock(&auth_lock);
+
+    // Find user
+    UserCredentials* user = NULL;
+    for (uint32_t i = 0; i < user_count; i++) {
+        if (strcmp(user_db[i].username, username) == 0) {
+            user = &user_db[i];
+            break;
+        }
+    }
+
+    if (!user || !user->is_active) {
+        spin_unlock(&auth_lock);
+        kprintf("[AUTH] Cannot create session: user '%s' not found or inactive\n", username);
+        return NULL;
+    }
+
+    // Allocate session
+    UserSession* session = (UserSession*)kmalloc(sizeof(UserSession));
+    if (!session) {
+        spin_unlock(&auth_lock);
+        kprintf("[AUTH] Failed to allocate session\n");
+        return NULL;
+    }
+
+    // Initialize session
+    session->user_id = user->user_id;
+    session->group_id = user->group_id;
+    strncpy(session->username, user->username, AUTH_USERNAME_MAX - 1);
+    session->username[AUTH_USERNAME_MAX - 1] = '\0';
+    session->is_admin = user->is_admin;
+    session->login_time = rdtsc();
+
+    // Update last login
+    user->last_login = session->login_time;
+
+    spin_unlock(&auth_lock);
+
+    kprintf("[AUTH] Session created for user '%s' (uid=%u, gid=%u)\n",
+            username, session->user_id, session->group_id);
+
+    return session;
+}
+
+void auth_destroy_session(UserSession* session) {
+    if (!session) return;
+
+    kprintf("[AUTH] Destroying session for user '%s'\n", session->username);
+    kfree(session);
+}
+
+UserSession* auth_get_session_by_user_id(uint32_t user_id) {
+    // This function is not needed for current design - sessions are owned by tasks
+    // Left as stub for future multi-session support
+    (void)user_id;
+    return NULL;
+}
+
+uint32_t auth_get_user_id(const char* username) {
+    if (!username) return (uint32_t)-1;
+
+    spin_lock(&auth_lock);
+
+    for (uint32_t i = 0; i < user_count; i++) {
+        if (strcmp(user_db[i].username, username) == 0) {
+            uint32_t uid = user_db[i].user_id;
+            spin_unlock(&auth_lock);
+            return uid;
+        }
+    }
+
+    spin_unlock(&auth_lock);
+    return (uint32_t)-1;  // User not found
+}
+
+const char* auth_get_username(uint32_t user_id) {
+    spin_lock(&auth_lock);
+
+    for (uint32_t i = 0; i < user_count; i++) {
+        if (user_db[i].user_id == user_id) {
+            // Return pointer to username in database
+            // WARNING: Caller must not modify! (Read-only)
+            const char* name = user_db[i].username;
+            spin_unlock(&auth_lock);
+            return name;
+        }
+    }
+
+    spin_unlock(&auth_lock);
+    return NULL;  // User not found
 }

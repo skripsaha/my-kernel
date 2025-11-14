@@ -17,6 +17,7 @@
 #include "eventdriven_demo.h"
 #include "shell.h"
 #include "serial.h"
+#include "usermode.h"
 
 extern uint8_t user_experience_level;
 
@@ -110,6 +111,11 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     kprintf("\n%[H]=== Step 3: TSS Setup ===%[D]\n");
     tss_init();
     tss_test();
+
+    // === USER MODE (RING 3) ===
+    kprintf("\n%[H]=== Step 3.5: User Mode Setup ===%[D]\n");
+    usermode_init();
+    kprintf("%[S] User mode (Ring 3) initialized%[D]\n");
 
     // === ТЕСТ PIC ===
     kprintf("\n%[H]=== Step 4: PIC Setup === %[D]");

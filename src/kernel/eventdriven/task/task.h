@@ -112,6 +112,7 @@ typedef struct Task {
     // === STATE ===
     TaskState state;               // Current state
     TaskHealth health;             // Health metrics
+    bool user_mode;                // True if Ring 3 user task
 
     // === TIMING ===
     uint64_t creation_time;        // RDTSC at creation
@@ -138,6 +139,9 @@ typedef struct Task {
     // === COMMUNICATION ===
     TaskMessageQueue* message_queue;  // Pointer to task's message queue
     uint64_t pending_messages;        // Number of pending messages
+
+    // === USER SESSION ===
+    void* user_session;            // UserSession* (owned by task, freed on task death)
 
     // === LINKED LIST ===
     struct Task* next;             // Next task in scheduler queue

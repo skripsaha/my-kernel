@@ -173,7 +173,12 @@ static int fs_open(const char* path) {
         strcpy(tags[1].key, "type");
         strcpy(tags[1].value, "file");
 
-        uint64_t inode_id = tagfs_create_file(tags, 2);
+        // TODO: Get actual user_id from task context
+        uint32_t owner_id = 0;  // Wizard for now
+        uint32_t capabilities = TAGFS_CAP_DEFAULT;
+        uint8_t access_scope = TAGFS_ACCESS_PUBLIC;
+
+        uint64_t inode_id = tagfs_create_file(tags, 2, owner_id, capabilities, access_scope);
 
         if (inode_id != TAGFS_INVALID_INODE) {
             int fd = allocate_fd(inode_id, path, 0);
@@ -474,7 +479,12 @@ int storage_deck_process(RoutingEntry* entry) {
             uint32_t tag_count = *(uint32_t*)event->data;
             Tag* tags = (Tag*)(event->data + 4);
 
-            uint64_t inode_id = tagfs_create_file(tags, tag_count);
+            // TODO: Get actual user_id from event sender
+            uint32_t owner_id = 0;  // Wizard for now
+            uint32_t capabilities = TAGFS_CAP_DEFAULT;
+            uint8_t access_scope = TAGFS_ACCESS_PUBLIC;
+
+            uint64_t inode_id = tagfs_create_file(tags, tag_count, owner_id, capabilities, access_scope);
             if (inode_id != TAGFS_INVALID_INODE) {
                 deck_complete(entry, DECK_PREFIX_STORAGE, (void*)inode_id);
                 kprintf("[STORAGE] Event %lu: created file inode=%lu with %u tags\n",

@@ -186,6 +186,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     task->health.stability = 100;
     task->health.progress = 100;
     task->health.overall_health = 87;  // (100+50+100+100)/4 ≈ 87
+    task->user_mode = false;  // Default to kernel mode (Ring 0)
 
     // === TIMING ===
     task->creation_time = rdtsc();
