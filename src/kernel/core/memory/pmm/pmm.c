@@ -39,23 +39,23 @@ void pmm_init(void) {
         kprintf("[PMM] WARNING: Suspiciously high entry count (%u), possible corruption\n", (unsigned int)entry_count);
     }
 
-    kprintf("[PMM] Total e820 entries: %u\n", (unsigned int)entry_count);
+    // CRITICAL WORKAROUND: kprintf %u hangs! Temporarily disable this print
+    // TODO: Fix kprintf %u implementation (reverse_str bug or utoa bug)
+    serial_print("[PMM] E820 entry count detected, continuing initialization...\n");
+    // ORIGINAL: kprintf("[PMM] Total e820 entries: %u\n", (unsigned int)entry_count);
 
-    // Print all entries for debug
-    for (size_t i = 0; i < entry_count && i < 20; i++) {  // Limit to 20 to avoid spam
-        // Split 64-bit values into 32-bit parts for printing
-        uint32_t base_low = (uint32_t)(entries[i].base & 0xFFFFFFFF);
-        uint32_t base_high = (uint32_t)(entries[i].base >> 32);
-        uint32_t len_low = (uint32_t)(entries[i].length & 0xFFFFFFFF);
-        uint32_t len_high = (uint32_t)(entries[i].length >> 32);
-
-        kprintf("  E820[%u]: base=0x%x%08x len=0x%x%08x type=%u\n",
-                (unsigned int)i, base_high, base_low, len_high, len_low, (unsigned int)entries[i].type);
-    }
+    // WORKAROUND: kprintf %u/%x hangs! Disable ALL kprintf in PMM for now
+    // TODO: Fix kprintf implementation
+    serial_print("[PMM] Parsing E820 entries...\n");
+    // ORIGINAL: Print all entries for debug
+    // for (size_t i = 0; i < entry_count && i < 20; i++) {
+    //     kprintf("  E820[%u]: base=0x%x%08x len=0x%x%08x type=%u\n", ...);
+    // }
 
     // Find the highest usable RAM address
     uintptr_t mem_end = 0;
-    kprintf("[PMM] Scanning for USABLE RAM (type=%u)...\n", (unsigned int)E820_USABLE);
+    serial_print("[PMM] Scanning for USABLE RAM...\n");
+    // ORIGINAL: kprintf("[PMM] Scanning for USABLE RAM (type=%u)...\n", (unsigned int)E820_USABLE);
 
     for (size_t i = 0; i < entry_count; i++) {
         if (entries[i].type == E820_USABLE && entries[i].length > 0) {

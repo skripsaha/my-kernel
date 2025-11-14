@@ -1086,14 +1086,15 @@ void* memchr(const void* s, int c, size_t n) {
 // ========== Преобразования чисел ==========
 char* reverse_str(char* str) {
     if (!str) return NULL;
-    
+
+    char* orig = str;  // CRITICAL FIX: Save original pointer!
     char* end = str + strlen(str) - 1;
     while (str < end) {
         char tmp = *str;
         *str++ = *end;
         *end-- = tmp;
     }
-    return str;
+    return orig;  // CRITICAL FIX: Return original pointer, not end!
 }
 
 char* reverse_range(char* start, char* end) {
