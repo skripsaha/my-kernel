@@ -825,7 +825,7 @@ int tagfs_format(uint64_t total_blocks) {
 // FILE OPERATIONS
 // ============================================================================
 
-uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count) {
+uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count, uint32_t owner_id, uint32_t permissions) {
     if (tag_count > TAGFS_MAX_TAGS_PER_FILE) {
         kprintf("[TAGFS] Error: too many tags (%u > %u)\n", tag_count, TAGFS_MAX_TAGS_PER_FILE);
         return TAGFS_INVALID_INODE;
@@ -868,6 +868,12 @@ uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count) {
     inode->size = 0;
     inode->creation_time = rdtsc();
     inode->modification_time = inode->creation_time;
+
+    // Set ownership and permissions
+    inode->owner_id = owner_id;
+    inode->group_id = owner_id;  // Default: group = user
+    inode->permissions = permissions;
+
     inode->tag_count = tag_count;
 
     // Copy tags
@@ -1570,9 +1576,10 @@ int tagfs_context_list_files(uint64_t* result_inodes, uint32_t* count_out, uint3
 
 // Создать файл с данными
 uint64_t tagfs_create_file_with_data(Tag* tags, uint32_t tag_count,
-                                     const uint8_t* data, uint64_t size) {
+                                     const uint8_t* data, uint64_t size,
+                                     uint32_t owner_id, uint32_t permissions) {
     // Создаем файл
-    uint64_t inode_id = tagfs_create_file(tags, tag_count);
+    uint64_t inode_id = tagfs_create_file(tags, tag_count, owner_id, permissions);
     if (inode_id == TAGFS_INVALID_INODE) {
         return TAGFS_INVALID_INODE;
     }
@@ -1745,4 +1752,158 @@ uint64_t tagfs_find_by_name(const char* name) {
     }
 
     return TAGFS_INVALID_INODE;  // Не найдено в контексте
+}
+
+// ============================================================================
+// PERMISSION CHECKING IMPLEMENTATION
+// ============================================================================
+
+// Helper function to check if user is owner
+static bool is_owner(FileInode* inode, uint32_t user_id) {
+    return inode->owner_id == user_id;
+}
+
+// Helper function to check if user is in group
+static bool is_in_group(FileInode* inode, uint32_t group_id) {
+    return inode->group_id == group_id;
+}
+
+// Helper function to check if user is root (user_id == 0)
+static bool is_root(uint32_t user_id) {
+    return user_id == 0;
+}
+
+bool tagfs_check_read_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        return false;
+    }
+
+    // Root can always read
+    if (is_root(user_id)) {
+        return true;
+    }
+
+    // Check owner permissions
+    if (is_owner(inode, user_id)) {
+        return (inode->permissions & TAGFS_PERM_OWNER_READ) != 0;
+    }
+
+    // Check group permissions
+    if (is_in_group(inode, group_id)) {
+        return (inode->permissions & TAGFS_PERM_GROUP_READ) != 0;
+    }
+
+    // Check other permissions
+    return (inode->permissions & TAGFS_PERM_OTHER_READ) != 0;
+}
+
+bool tagfs_check_write_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        return false;
+    }
+
+    // Root can always write
+    if (is_root(user_id)) {
+        return true;
+    }
+
+    // Check owner permissions
+    if (is_owner(inode, user_id)) {
+        return (inode->permissions & TAGFS_PERM_OWNER_WRITE) != 0;
+    }
+
+    // Check group permissions
+    if (is_in_group(inode, group_id)) {
+        return (inode->permissions & TAGFS_PERM_GROUP_WRITE) != 0;
+    }
+
+    // Check other permissions
+    return (inode->permissions & TAGFS_PERM_OTHER_WRITE) != 0;
+}
+
+bool tagfs_check_exec_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        return false;
+    }
+
+    // Root can always execute
+    if (is_root(user_id)) {
+        return true;
+    }
+
+    // Check owner permissions
+    if (is_owner(inode, user_id)) {
+        return (inode->permissions & TAGFS_PERM_OWNER_EXEC) != 0;
+    }
+
+    // Check group permissions
+    if (is_in_group(inode, group_id)) {
+        return (inode->permissions & TAGFS_PERM_GROUP_EXEC) != 0;
+    }
+
+    // Check other permissions
+    return (inode->permissions & TAGFS_PERM_OTHER_EXEC) != 0;
+}
+
+int tagfs_chown(uint64_t inode_id, uint32_t new_owner_id, uint32_t user_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] chown: Invalid inode %lu\n", inode_id);
+        return -1;
+    }
+
+    // Only root or current owner can change ownership
+    if (!is_root(user_id) && !is_owner(inode, user_id)) {
+        kprintf("[TAGFS] chown: Permission denied (not owner or root)\n");
+        return -1;
+    }
+
+    inode->owner_id = new_owner_id;
+    inode->modification_time = rdtsc();
+
+    kprintf("[TAGFS] chown: inode=%lu new_owner=%u\n", inode_id, new_owner_id);
+    return 0;
+}
+
+int tagfs_chmod(uint64_t inode_id, uint32_t new_permissions, uint32_t user_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] chmod: Invalid inode %lu\n", inode_id);
+        return -1;
+    }
+
+    // Only root or current owner can change permissions
+    if (!is_root(user_id) && !is_owner(inode, user_id)) {
+        kprintf("[TAGFS] chmod: Permission denied (not owner or root)\n");
+        return -1;
+    }
+
+    inode->permissions = new_permissions & 0x1FF;  // Mask to 9 bits (rwxrwxrwx)
+    inode->modification_time = rdtsc();
+
+    kprintf("[TAGFS] chmod: inode=%lu permissions=0x%x\n", inode_id, new_permissions);
+    return 0;
+}
+
+int tagfs_chgrp(uint64_t inode_id, uint32_t new_group_id, uint32_t user_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] chgrp: Invalid inode %lu\n", inode_id);
+        return -1;
+    }
+
+    // Only root or current owner can change group
+    if (!is_root(user_id) && !is_owner(inode, user_id)) {
+        kprintf("[TAGFS] chgrp: Permission denied (not owner or root)\n");
+        return -1;
+    }
+
+    inode->group_id = new_group_id;
+    inode->modification_time = rdtsc();
+
+    kprintf("[TAGFS] chgrp: inode=%lu new_group=%u\n", inode_id, new_group_id);
+    return 0;
 }

@@ -462,12 +462,17 @@ int cmd_create(int argc, char** argv) {
     }
 
     // Create file
+    // TODO: Use actual user_id from current session (for now: root = 0)
+    uint32_t owner_id = 0;  // Root user
+    uint32_t permissions = TAGFS_PERM_DEFAULT;  // 0644: rw-r--r--
+
     uint64_t inode_id;
     if (data) {
         inode_id = tagfs_create_file_with_data(tags, tag_count,
-                                                (const uint8_t*)data, strlen(data));
+                                                (const uint8_t*)data, strlen(data),
+                                                owner_id, permissions);
     } else {
-        inode_id = tagfs_create_file(tags, tag_count);
+        inode_id = tagfs_create_file(tags, tag_count, owner_id, permissions);
     }
 
     if (inode_id == TAGFS_INVALID_INODE) {

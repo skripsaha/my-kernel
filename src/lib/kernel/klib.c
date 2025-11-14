@@ -43,10 +43,21 @@ void* kmalloc(size_t size) {
         if (curr->size >= size) {
             // Достаточно места для разделения блока
             if (curr->size > size + sizeof(mem_block_t) + KLIB_BLOCK_ALIGNMENT) {
-                mem_block_t* new_block = (mem_block_t*)((char*)curr + sizeof(mem_block_t) + size);
+                // CRITICAL FIX: Ensure new_block is properly aligned
+                // sizeof(mem_block_t) is now guaranteed to be multiple of 16 (24 bytes)
+                // and size is aligned, so new_block will be aligned too
+                uintptr_t new_block_addr = (uintptr_t)curr + sizeof(mem_block_t) + size;
+
+                // Verify alignment (this should always pass now)
+                if (new_block_addr % KLIB_BLOCK_ALIGNMENT != 0) {
+                    panic("CRITICAL: new_block alignment error!");
+                }
+
+                mem_block_t* new_block = (mem_block_t*)new_block_addr;
                 new_block->size = curr->size - size - sizeof(mem_block_t);
                 new_block->next = curr->next;
                 new_block->magic = KLIB_MAGIC_NUMBER;
+                new_block->_padding = 0;  // Initialize padding
                 curr->size = size;
                 curr->next = new_block;
             }

@@ -44,6 +44,27 @@
 #define TAGFS_INVALID_INODE     0
 
 // ============================================================================
+// FILE PERMISSIONS - Unix-style permission bits
+// ============================================================================
+
+// Permission bits (same as Unix: rwxrwxrwx = owner/group/other)
+#define TAGFS_PERM_OWNER_READ   (1 << 8)  // Owner can read
+#define TAGFS_PERM_OWNER_WRITE  (1 << 7)  // Owner can write
+#define TAGFS_PERM_OWNER_EXEC   (1 << 6)  // Owner can execute
+
+#define TAGFS_PERM_GROUP_READ   (1 << 5)  // Group can read
+#define TAGFS_PERM_GROUP_WRITE  (1 << 4)  // Group can write
+#define TAGFS_PERM_GROUP_EXEC   (1 << 3)  // Group can execute
+
+#define TAGFS_PERM_OTHER_READ   (1 << 2)  // Others can read
+#define TAGFS_PERM_OTHER_WRITE  (1 << 1)  // Others can write
+#define TAGFS_PERM_OTHER_EXEC   (1 << 0)  // Others can execute
+
+// Default permissions (0644 = rw-r--r--)
+#define TAGFS_PERM_DEFAULT      (TAGFS_PERM_OWNER_READ | TAGFS_PERM_OWNER_WRITE | \
+                                 TAGFS_PERM_GROUP_READ | TAGFS_PERM_OTHER_READ)
+
+// ============================================================================
 // TAG STRUCTURE - Тег (key:value пара)
 // ============================================================================
 
@@ -62,8 +83,12 @@ typedef struct {
     uint64_t creation_time;             // Время создания (RDTSC)
     uint64_t modification_time;         // Время последней модификации
 
+    uint32_t owner_id;                  // User ID владельца файла
+    uint32_t group_id;                  // Group ID
+    uint32_t permissions;               // Unix-style permissions (rwxrwxrwx)
     uint32_t tag_count;                 // Количество тегов
     uint32_t flags;                     // Флаги (reserved)
+    uint32_t _padding1;                 // Выравнивание до 8 байт
 
     Tag tags[TAGFS_MAX_TAGS_PER_FILE];  // Массив тегов
 
@@ -221,12 +246,13 @@ int tagfs_load_inode_table(void);
 // FILE OPERATIONS
 // ============================================================================
 
-// Создать файл с тегами
-uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count);
+// Создать файл с тегами (NEW: с указанием owner и permissions)
+uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count, uint32_t owner_id, uint32_t permissions);
 
-// Создать файл с данными
+// Создать файл с данными (NEW: с указанием owner и permissions)
 uint64_t tagfs_create_file_with_data(Tag* tags, uint32_t tag_count,
-                                     const uint8_t* data, uint64_t size);
+                                     const uint8_t* data, uint64_t size,
+                                     uint32_t owner_id, uint32_t permissions);
 
 // Удалить файл (помечает trashed:true, мягкое удаление - в корзину)
 int tagfs_trash_file(uint64_t inode_id);
@@ -308,6 +334,28 @@ bool tagfs_context_matches(uint64_t inode_id);
 
 // Получить список файлов в текущем контексте
 int tagfs_context_list_files(uint64_t* result_inodes, uint32_t* count_out, uint32_t max_results);
+
+// ============================================================================
+// PERMISSION CHECKING (NEW!)
+// ============================================================================
+
+// Проверить, может ли пользователь читать файл
+bool tagfs_check_read_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id);
+
+// Проверить, может ли пользователь писать в файл
+bool tagfs_check_write_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id);
+
+// Проверить, может ли пользователь выполнять файл
+bool tagfs_check_exec_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id);
+
+// Изменить владельца файла (только root или текущий owner)
+int tagfs_chown(uint64_t inode_id, uint32_t new_owner_id, uint32_t user_id);
+
+// Изменить права доступа (только owner или root)
+int tagfs_chmod(uint64_t inode_id, uint32_t new_permissions, uint32_t user_id);
+
+// Изменить группу файла (только owner или root)
+int tagfs_chgrp(uint64_t inode_id, uint32_t new_group_id, uint32_t user_id);
 
 // ============================================================================
 // UTILITY FUNCTIONS
