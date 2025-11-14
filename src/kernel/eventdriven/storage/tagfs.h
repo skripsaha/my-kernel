@@ -44,25 +44,43 @@
 #define TAGFS_INVALID_INODE     0
 
 // ============================================================================
-// FILE PERMISSIONS - Unix-style permission bits
+// FILE CAPABILITIES - TAG-BASED ACCESS CONTROL (INNOVATIVE!)
+// ============================================================================
+// PHILOSOPHY: Forget Unix rwx! We use CAPABILITY TAGS!
+//
+// Instead of permissions, files have CAPABILITIES:
+//   - can:read       - Anyone can read
+//   - can:write      - Anyone can write
+//   - can:execute    - Anyone can execute
+//   - can:share      - Anyone can share with others
+//   - can:delete     - Anyone can delete
+//
+// Access control via OWNERSHIP TAGS:
+//   - owner:wizard        - Wizard owns it (full access)
+//   - owner:user:alice    - Alice owns it
+//   - guild:developers    - Belongs to developers guild
+//   - access:public       - Everyone can access
+//   - access:private      - Only owner
+//   - access:guild        - Only guild members
+//
+// This is MUCH more flexible than Unix rwx!
 // ============================================================================
 
-// Permission bits (same as Unix: rwxrwxrwx = owner/group/other)
-#define TAGFS_PERM_OWNER_READ   (1 << 8)  // Owner can read
-#define TAGFS_PERM_OWNER_WRITE  (1 << 7)  // Owner can write
-#define TAGFS_PERM_OWNER_EXEC   (1 << 6)  // Owner can execute
+// Capability bits (what operations are allowed)
+#define TAGFS_CAP_READ      (1 << 0)  // Can read file content
+#define TAGFS_CAP_WRITE     (1 << 1)  // Can write/modify
+#define TAGFS_CAP_EXECUTE   (1 << 2)  // Can execute as program
+#define TAGFS_CAP_SHARE     (1 << 3)  // Can share with others
+#define TAGFS_CAP_DELETE    (1 << 4)  // Can delete file
+#define TAGFS_CAP_METADATA  (1 << 5)  // Can change tags/metadata
 
-#define TAGFS_PERM_GROUP_READ   (1 << 5)  // Group can read
-#define TAGFS_PERM_GROUP_WRITE  (1 << 4)  // Group can write
-#define TAGFS_PERM_GROUP_EXEC   (1 << 3)  // Group can execute
+// Access scope (who can access)
+#define TAGFS_ACCESS_PRIVATE    0  // Only owner
+#define TAGFS_ACCESS_GUILD      1  // Owner + guild members
+#define TAGFS_ACCESS_PUBLIC     2  // Everyone (wizard, apprentices, guests)
 
-#define TAGFS_PERM_OTHER_READ   (1 << 2)  // Others can read
-#define TAGFS_PERM_OTHER_WRITE  (1 << 1)  // Others can write
-#define TAGFS_PERM_OTHER_EXEC   (1 << 0)  // Others can execute
-
-// Default permissions (0644 = rw-r--r--)
-#define TAGFS_PERM_DEFAULT      (TAGFS_PERM_OWNER_READ | TAGFS_PERM_OWNER_WRITE | \
-                                 TAGFS_PERM_GROUP_READ | TAGFS_PERM_OTHER_READ)
+// Default capabilities for new files (read, write for owner + guild read)
+#define TAGFS_CAP_DEFAULT      (TAGFS_CAP_READ | TAGFS_CAP_WRITE)
 
 // ============================================================================
 // TAG STRUCTURE - Тег (key:value пара)
@@ -83,12 +101,13 @@ typedef struct {
     uint64_t creation_time;             // Время создания (RDTSC)
     uint64_t modification_time;         // Время последней модификации
 
-    uint32_t owner_id;                  // User ID владельца файла
-    uint32_t group_id;                  // Group ID
-    uint32_t permissions;               // Unix-style permissions (rwxrwxrwx)
+    uint32_t owner_id;                  // User ID владельца (0 = wizard, 1000+ = apprentice)
+    uint32_t guild_id;                  // Guild ID (гильдия, НЕ group!)
+    uint32_t capabilities;              // File capabilities (TAGFS_CAP_*)
+    uint8_t  access_scope;              // TAGFS_ACCESS_PRIVATE/GUILD/PUBLIC
+    uint8_t  _padding1[3];              // Alignment padding
     uint32_t tag_count;                 // Количество тегов
     uint32_t flags;                     // Флаги (reserved)
-    uint32_t _padding1;                 // Выравнивание до 8 байт
 
     Tag tags[TAGFS_MAX_TAGS_PER_FILE];  // Массив тегов
 
@@ -246,13 +265,15 @@ int tagfs_load_inode_table(void);
 // FILE OPERATIONS
 // ============================================================================
 
-// Создать файл с тегами (NEW: с указанием owner и permissions)
-uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count, uint32_t owner_id, uint32_t permissions);
+// Создать файл с тегами (INNOVATIVE: с capabilities вместо permissions!)
+uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count, uint32_t owner_id,
+                           uint32_t capabilities, uint8_t access_scope);
 
-// Создать файл с данными (NEW: с указанием owner и permissions)
+// Создать файл с данными (INNOVATIVE: с capabilities вместо permissions!)
 uint64_t tagfs_create_file_with_data(Tag* tags, uint32_t tag_count,
                                      const uint8_t* data, uint64_t size,
-                                     uint32_t owner_id, uint32_t permissions);
+                                     uint32_t owner_id, uint32_t capabilities,
+                                     uint8_t access_scope);
 
 // Удалить файл (помечает trashed:true, мягкое удаление - в корзину)
 int tagfs_trash_file(uint64_t inode_id);
@@ -336,26 +357,31 @@ bool tagfs_context_matches(uint64_t inode_id);
 int tagfs_context_list_files(uint64_t* result_inodes, uint32_t* count_out, uint32_t max_results);
 
 // ============================================================================
-// PERMISSION CHECKING (NEW!)
+// CAPABILITY CHECKING (INNOVATIVE TAG-BASED ACCESS!)
 // ============================================================================
 
-// Проверить, может ли пользователь читать файл
-bool tagfs_check_read_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id);
+// Проверить, есть ли у пользователя capability для файла
+// capability: TAGFS_CAP_READ, TAGFS_CAP_WRITE, etc.
+bool tagfs_check_capability(uint64_t inode_id, uint32_t user_id, uint32_t guild_id,
+                           uint32_t capability);
 
-// Проверить, может ли пользователь писать в файл
-bool tagfs_check_write_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id);
+// Удобные обёртки для частых операций
+bool tagfs_can_read(uint64_t inode_id, uint32_t user_id, uint32_t guild_id);
+bool tagfs_can_write(uint64_t inode_id, uint32_t user_id, uint32_t guild_id);
+bool tagfs_can_execute(uint64_t inode_id, uint32_t user_id, uint32_t guild_id);
+bool tagfs_can_delete(uint64_t inode_id, uint32_t user_id, uint32_t guild_id);
 
-// Проверить, может ли пользователь выполнять файл
-bool tagfs_check_exec_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id);
+// Изменить владельца файла (только wizard или текущий owner)
+int tagfs_transfer_ownership(uint64_t inode_id, uint32_t new_owner_id, uint32_t user_id);
 
-// Изменить владельца файла (только root или текущий owner)
-int tagfs_chown(uint64_t inode_id, uint32_t new_owner_id, uint32_t user_id);
+// Изменить capabilities (только owner или wizard)
+int tagfs_set_capabilities(uint64_t inode_id, uint32_t new_capabilities, uint32_t user_id);
 
-// Изменить права доступа (только owner или root)
-int tagfs_chmod(uint64_t inode_id, uint32_t new_permissions, uint32_t user_id);
+// Изменить access scope (только owner или wizard)
+int tagfs_set_access_scope(uint64_t inode_id, uint8_t new_scope, uint32_t user_id);
 
-// Изменить группу файла (только owner или root)
-int tagfs_chgrp(uint64_t inode_id, uint32_t new_group_id, uint32_t user_id);
+// Изменить guild файла (только owner или wizard)
+int tagfs_change_guild(uint64_t inode_id, uint32_t new_guild_id, uint32_t user_id);
 
 // ============================================================================
 // UTILITY FUNCTIONS

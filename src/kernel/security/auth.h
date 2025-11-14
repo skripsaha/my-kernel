@@ -4,7 +4,13 @@
 #include "klib.h"
 
 // ============================================================================
-// AUTHENTICATION & USER MANAGEMENT (Production-Ready)
+// AUTHENTICATION & USER MANAGEMENT - INNOVATIVE BOXOS APPROACH!
+// ============================================================================
+// PHILOSOPHY:
+// - NO Unix-style users! We have WIZARDS and APPRENTICES
+// - NO root! We have THE WIZARD (uid=0)
+// - Users belong to GUILDS (not groups)
+// - Tag-based permissions (not rwx)
 // ============================================================================
 
 #define AUTH_USERNAME_MAX 32
@@ -12,25 +18,29 @@
 #define AUTH_SALT_SIZE 16
 #define AUTH_MAX_USERS 64
 
+// User types
+#define USER_TYPE_WIZARD    0  // The all-powerful wizard (uid=0)
+#define USER_TYPE_APPRENTICE 1  // Regular users (uid=1000+)
+
 // User credentials structure (NO PLAINTEXT PASSWORDS!)
 typedef struct {
-    uint32_t user_id;                        // Unique user ID (0 = root)
-    uint32_t group_id;                       // Primary group ID
+    uint32_t user_id;                        // Unique user ID (0 = wizard, 1000+ = apprentices)
+    uint32_t guild_id;                       // Guild (не group!)
     char username[AUTH_USERNAME_MAX];
     uint8_t password_hash[AUTH_PASSWORD_HASH_SIZE];
     uint8_t salt[AUTH_SALT_SIZE];
-    int is_admin;
-    int is_active;
+    uint8_t user_type;                       // USER_TYPE_WIZARD or USER_TYPE_APPRENTICE
+    bool is_active;
     uint64_t last_login;
     uint32_t failed_attempts;
 } UserCredentials;
 
 // User session - связывает task с пользователем
 typedef struct {
-    uint32_t user_id;                        // ID пользователя (0 = root)
-    uint32_t group_id;                       // Группа пользователя
+    uint32_t user_id;                        // ID пользователя (0 = wizard)
+    uint32_t guild_id;                       // Guild ID (гильдия, не группа!)
     char username[AUTH_USERNAME_MAX];        // Имя пользователя
-    bool is_admin;                           // Флаг администратора
+    uint8_t user_type;                       // WIZARD or APPRENTICE
     uint64_t login_time;                     // Время входа
 } UserSession;
 

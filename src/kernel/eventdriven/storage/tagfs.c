@@ -825,7 +825,8 @@ int tagfs_format(uint64_t total_blocks) {
 // FILE OPERATIONS
 // ============================================================================
 
-uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count, uint32_t owner_id, uint32_t permissions) {
+uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count, uint32_t owner_id,
+                          uint32_t capabilities, uint8_t access_scope) {
     if (tag_count > TAGFS_MAX_TAGS_PER_FILE) {
         kprintf("[TAGFS] Error: too many tags (%u > %u)\n", tag_count, TAGFS_MAX_TAGS_PER_FILE);
         return TAGFS_INVALID_INODE;
@@ -869,10 +870,11 @@ uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count, uint32_t owner_id, uin
     inode->creation_time = rdtsc();
     inode->modification_time = inode->creation_time;
 
-    // Set ownership and permissions
+    // Set ownership and INNOVATIVE CAPABILITIES!
     inode->owner_id = owner_id;
-    inode->group_id = owner_id;  // Default: group = user
-    inode->permissions = permissions;
+    inode->guild_id = owner_id;  // Default: guild = user (personal guild)
+    inode->capabilities = capabilities;
+    inode->access_scope = access_scope;
 
     inode->tag_count = tag_count;
 
@@ -1577,9 +1579,10 @@ int tagfs_context_list_files(uint64_t* result_inodes, uint32_t* count_out, uint3
 // Создать файл с данными
 uint64_t tagfs_create_file_with_data(Tag* tags, uint32_t tag_count,
                                      const uint8_t* data, uint64_t size,
-                                     uint32_t owner_id, uint32_t permissions) {
-    // Создаем файл
-    uint64_t inode_id = tagfs_create_file(tags, tag_count, owner_id, permissions);
+                                     uint32_t owner_id, uint32_t capabilities,
+                                     uint8_t access_scope) {
+    // Создаем файл с INNOVATIVE CAPABILITIES!
+    uint64_t inode_id = tagfs_create_file(tags, tag_count, owner_id, capabilities, access_scope);
     if (inode_id == TAGFS_INVALID_INODE) {
         return TAGFS_INVALID_INODE;
     }
@@ -1755,155 +1758,161 @@ uint64_t tagfs_find_by_name(const char* name) {
 }
 
 // ============================================================================
-// PERMISSION CHECKING IMPLEMENTATION
+// CAPABILITY CHECKING IMPLEMENTATION - INNOVATIVE TAG-BASED ACCESS!
 // ============================================================================
 
-// Helper function to check if user is owner
+// Helper: Check if user is the wizard (uid=0)
+static bool is_wizard(uint32_t user_id) {
+    return user_id == 0;
+}
+
+// Helper: Check if user is owner
 static bool is_owner(FileInode* inode, uint32_t user_id) {
     return inode->owner_id == user_id;
 }
 
-// Helper function to check if user is in group
-static bool is_in_group(FileInode* inode, uint32_t group_id) {
-    return inode->group_id == group_id;
+// Helper: Check if user is in guild
+static bool is_in_guild(FileInode* inode, uint32_t guild_id) {
+    return inode->guild_id == guild_id;
 }
 
-// Helper function to check if user is root (user_id == 0)
-static bool is_root(uint32_t user_id) {
-    return user_id == 0;
-}
-
-bool tagfs_check_read_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id) {
+// Master capability check - INNOVATIVE!
+bool tagfs_check_capability(uint64_t inode_id, uint32_t user_id, uint32_t guild_id,
+                           uint32_t capability) {
     FileInode* inode = tagfs_get_inode(inode_id);
     if (!inode) {
         return false;
     }
 
-    // Root can always read
-    if (is_root(user_id)) {
+    // The Wizard has ALL capabilities (всемогущий!)
+    if (is_wizard(user_id)) {
         return true;
     }
 
-    // Check owner permissions
-    if (is_owner(inode, user_id)) {
-        return (inode->permissions & TAGFS_PERM_OWNER_READ) != 0;
+    // Check if file has this capability at all
+    if (!(inode->capabilities & capability)) {
+        return false;  // File doesn't grant this capability to anyone
     }
 
-    // Check group permissions
-    if (is_in_group(inode, group_id)) {
-        return (inode->permissions & TAGFS_PERM_GROUP_READ) != 0;
-    }
+    // Now check access scope
+    switch (inode->access_scope) {
+        case TAGFS_ACCESS_PUBLIC:
+            // Everyone can access (wizard, apprentices, guests)
+            return true;
 
-    // Check other permissions
-    return (inode->permissions & TAGFS_PERM_OTHER_READ) != 0;
+        case TAGFS_ACCESS_GUILD:
+            // Owner + guild members
+            if (is_owner(inode, user_id) || is_in_guild(inode, guild_id)) {
+                return true;
+            }
+            return false;
+
+        case TAGFS_ACCESS_PRIVATE:
+            // Only owner
+            return is_owner(inode, user_id);
+
+        default:
+            return false;
+    }
 }
 
-bool tagfs_check_write_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id) {
-    FileInode* inode = tagfs_get_inode(inode_id);
-    if (!inode) {
-        return false;
-    }
-
-    // Root can always write
-    if (is_root(user_id)) {
-        return true;
-    }
-
-    // Check owner permissions
-    if (is_owner(inode, user_id)) {
-        return (inode->permissions & TAGFS_PERM_OWNER_WRITE) != 0;
-    }
-
-    // Check group permissions
-    if (is_in_group(inode, group_id)) {
-        return (inode->permissions & TAGFS_PERM_GROUP_WRITE) != 0;
-    }
-
-    // Check other permissions
-    return (inode->permissions & TAGFS_PERM_OTHER_WRITE) != 0;
+// Convenient wrappers for common operations
+bool tagfs_can_read(uint64_t inode_id, uint32_t user_id, uint32_t guild_id) {
+    return tagfs_check_capability(inode_id, user_id, guild_id, TAGFS_CAP_READ);
 }
 
-bool tagfs_check_exec_permission(uint64_t inode_id, uint32_t user_id, uint32_t group_id) {
-    FileInode* inode = tagfs_get_inode(inode_id);
-    if (!inode) {
-        return false;
-    }
-
-    // Root can always execute
-    if (is_root(user_id)) {
-        return true;
-    }
-
-    // Check owner permissions
-    if (is_owner(inode, user_id)) {
-        return (inode->permissions & TAGFS_PERM_OWNER_EXEC) != 0;
-    }
-
-    // Check group permissions
-    if (is_in_group(inode, group_id)) {
-        return (inode->permissions & TAGFS_PERM_GROUP_EXEC) != 0;
-    }
-
-    // Check other permissions
-    return (inode->permissions & TAGFS_PERM_OTHER_EXEC) != 0;
+bool tagfs_can_write(uint64_t inode_id, uint32_t user_id, uint32_t guild_id) {
+    return tagfs_check_capability(inode_id, user_id, guild_id, TAGFS_CAP_WRITE);
 }
 
-int tagfs_chown(uint64_t inode_id, uint32_t new_owner_id, uint32_t user_id) {
+bool tagfs_can_execute(uint64_t inode_id, uint32_t user_id, uint32_t guild_id) {
+    return tagfs_check_capability(inode_id, user_id, guild_id, TAGFS_CAP_EXECUTE);
+}
+
+bool tagfs_can_delete(uint64_t inode_id, uint32_t user_id, uint32_t guild_id) {
+    return tagfs_check_capability(inode_id, user_id, guild_id, TAGFS_CAP_DELETE);
+}
+
+// Transfer ownership (only wizard or current owner)
+int tagfs_transfer_ownership(uint64_t inode_id, uint32_t new_owner_id, uint32_t user_id) {
     FileInode* inode = tagfs_get_inode(inode_id);
     if (!inode) {
-        kprintf("[TAGFS] chown: Invalid inode %lu\n", inode_id);
+        kprintf("[TAGFS] transfer_ownership: Invalid inode %lu\n", inode_id);
         return -1;
     }
 
-    // Only root or current owner can change ownership
-    if (!is_root(user_id) && !is_owner(inode, user_id)) {
-        kprintf("[TAGFS] chown: Permission denied (not owner or root)\n");
+    // Only wizard or current owner can transfer ownership
+    if (!is_wizard(user_id) && !is_owner(inode, user_id)) {
+        kprintf("[TAGFS] transfer_ownership: Permission denied (not wizard or owner)\n");
         return -1;
     }
 
     inode->owner_id = new_owner_id;
     inode->modification_time = rdtsc();
 
-    kprintf("[TAGFS] chown: inode=%lu new_owner=%u\n", inode_id, new_owner_id);
+    kprintf("[TAGFS] Ownership transferred: inode=%lu new_owner=%u\n", inode_id, new_owner_id);
     return 0;
 }
 
-int tagfs_chmod(uint64_t inode_id, uint32_t new_permissions, uint32_t user_id) {
+// Set capabilities (only owner or wizard)
+int tagfs_set_capabilities(uint64_t inode_id, uint32_t new_capabilities, uint32_t user_id) {
     FileInode* inode = tagfs_get_inode(inode_id);
     if (!inode) {
-        kprintf("[TAGFS] chmod: Invalid inode %lu\n", inode_id);
+        kprintf("[TAGFS] set_capabilities: Invalid inode %lu\n", inode_id);
         return -1;
     }
 
-    // Only root or current owner can change permissions
-    if (!is_root(user_id) && !is_owner(inode, user_id)) {
-        kprintf("[TAGFS] chmod: Permission denied (not owner or root)\n");
+    // Only wizard or owner can change capabilities
+    if (!is_wizard(user_id) && !is_owner(inode, user_id)) {
+        kprintf("[TAGFS] set_capabilities: Permission denied (not wizard or owner)\n");
         return -1;
     }
 
-    inode->permissions = new_permissions & 0x1FF;  // Mask to 9 bits (rwxrwxrwx)
+    inode->capabilities = new_capabilities & 0x3F;  // Mask to 6 bits (our capabilities)
     inode->modification_time = rdtsc();
 
-    kprintf("[TAGFS] chmod: inode=%lu permissions=0x%x\n", inode_id, new_permissions);
+    kprintf("[TAGFS] Capabilities set: inode=%lu caps=0x%x\n", inode_id, new_capabilities);
     return 0;
 }
 
-int tagfs_chgrp(uint64_t inode_id, uint32_t new_group_id, uint32_t user_id) {
+// Set access scope (only owner or wizard)
+int tagfs_set_access_scope(uint64_t inode_id, uint8_t new_scope, uint32_t user_id) {
     FileInode* inode = tagfs_get_inode(inode_id);
     if (!inode) {
-        kprintf("[TAGFS] chgrp: Invalid inode %lu\n", inode_id);
+        kprintf("[TAGFS] set_access_scope: Invalid inode %lu\n", inode_id);
         return -1;
     }
 
-    // Only root or current owner can change group
-    if (!is_root(user_id) && !is_owner(inode, user_id)) {
-        kprintf("[TAGFS] chgrp: Permission denied (not owner or root)\n");
+    // Only wizard or owner can change access scope
+    if (!is_wizard(user_id) && !is_owner(inode, user_id)) {
+        kprintf("[TAGFS] set_access_scope: Permission denied (not wizard or owner)\n");
         return -1;
     }
 
-    inode->group_id = new_group_id;
+    inode->access_scope = new_scope;
     inode->modification_time = rdtsc();
 
-    kprintf("[TAGFS] chgrp: inode=%lu new_group=%u\n", inode_id, new_group_id);
+    kprintf("[TAGFS] Access scope changed: inode=%lu scope=%u\n", inode_id, new_scope);
+    return 0;
+}
+
+// Change guild (only owner or wizard)
+int tagfs_change_guild(uint64_t inode_id, uint32_t new_guild_id, uint32_t user_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] change_guild: Invalid inode %lu\n", inode_id);
+        return -1;
+    }
+
+    // Only wizard or owner can change guild
+    if (!is_wizard(user_id) && !is_owner(inode, user_id)) {
+        kprintf("[TAGFS] change_guild: Permission denied (not wizard or owner)\n");
+        return -1;
+    }
+
+    inode->guild_id = new_guild_id;
+    inode->modification_time = rdtsc();
+
+    kprintf("[TAGFS] Guild changed: inode=%lu new_guild=%u\n", inode_id, new_guild_id);
     return 0;
 }
