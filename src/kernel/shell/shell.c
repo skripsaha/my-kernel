@@ -24,8 +24,9 @@ static uint32_t input_pos = 0;
 // REMOVED: Hardcoded passwords (security vulnerability)
 // NOW USING: Secure hashed password system in auth.c
 
-static char current_user[32] = "";  // No default login
-static int current_user_is_admin = 0;
+static char current_user[32] = "";  // Current logged-in user
+static int current_user_is_wizard = 0;  // 1 if Wizard, 0 if Apprentice
+static UserSession* current_session = NULL;  // Current user session
 
 // ============================================================================
 // COMMAND DECLARATIONS
@@ -49,6 +50,9 @@ int cmd_byebye(int argc, char** argv);
 int cmd_ls(int argc, char** argv);
 int cmd_whoami(int argc, char** argv);
 int cmd_login(int argc, char** argv);
+int cmd_logout(int argc, char** argv);
+int cmd_adduser(int argc, char** argv);
+int cmd_passwd(int argc, char** argv);
 
 // ============================================================================
 // COMMAND TABLE
@@ -71,6 +75,9 @@ static shell_command_t commands[] = {
     {"info", "Show system information", cmd_info},
     {"whoami", "Show current user", cmd_whoami},
     {"login", "Login as user", cmd_login},
+    {"logout", "Logout current user", cmd_logout},
+    {"adduser", "Add new user (Wizard only)", cmd_adduser},
+    {"passwd", "Change password", cmd_passwd},
     {"reboot", "Reboot the system", cmd_reboot},
     {"byebye", "Shutdown system", cmd_byebye},
     {NULL, NULL, NULL}  // Sentinel
@@ -85,11 +92,11 @@ static void shell_print_prompt(void) {
     if (current_user[0] == '\0') {
         // Not logged in
         kprintf("%[W](not logged in)%[D]@boxos:%[S]~%[D]$ ");
-    } else if (current_user_is_admin) {
-        // Administrator
+    } else if (current_user_is_wizard) {
+        // The Wizard (all-powerful!)
         kprintf("%[E]%s@boxos%[D]:%[S]~%[D]# ", current_user);
     } else {
-        // Regular user
+        // Apprentice (regular user)
         kprintf("%[H]%s@boxos%[D]:%[S]~%[D]$ ", current_user);
     }
 }
@@ -240,11 +247,25 @@ int cmd_whoami(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
+    if (current_user[0] == '\0') {
+        kprintf("Not logged in\n");
+        kprintf("Use 'login wizard wizard' to login as The Wizard\n");
+        return 0;
+    }
+
     kprintf("%s", current_user);
-    if (current_user_is_admin) {
-        kprintf(" (administrator)");
+    if (current_user_is_wizard) {
+        kprintf(" (%[E]The Wizard%[D] - all-powerful!)");
+    } else {
+        kprintf(" (%[H]Apprentice%[D])");
     }
     kprintf("\n");
+
+    if (current_session) {
+        kprintf("  UID: %u\n", current_session->user_id);
+        kprintf("  Guild: %u\n", current_session->guild_id);
+    }
+
     return 0;
 }
 
@@ -255,8 +276,17 @@ int cmd_whoami(int argc, char** argv) {
 int cmd_login(int argc, char** argv) {
     if (argc < 3) {
         kprintf("Usage: login <username> <password>\n");
-        kprintf("\n%[H]Security Note:%[D] Passwords are now hashed and stored securely.\n");
-        kprintf("No default accounts exist. Use kernel API to create users.\n");
+        kprintf("\n%[H]BoxOS Authentication:%[D]\n");
+        kprintf("  Default account: username='wizard', password='wizard'\n");
+        kprintf("  Wizards have ALL powers! Apprentices have limited access.\n");
+        kprintf("  Passwords are hashed with SHA-256-like algorithm.\n");
+        return -1;
+    }
+
+    // Check if already logged in
+    if (current_user[0] != '\0') {
+        kprintf("%[W]Already logged in as '%s'%[D]\n", current_user);
+        kprintf("Use 'logout' first\n");
         return -1;
     }
 
@@ -265,19 +295,152 @@ int cmd_login(int argc, char** argv) {
 
     // Verify password using secure authentication system
     if (auth_verify_password(username, password)) {
-        // Login successful
+        // Login successful - create session
+        current_session = auth_create_session(username);
+        if (!current_session) {
+            kprintf("%[E]Failed to create session%[D]\n");
+            return -1;
+        }
+
         strncpy(current_user, username, sizeof(current_user) - 1);
         current_user[sizeof(current_user) - 1] = '\0';
-        current_user_is_admin = auth_is_admin(username);
+        current_user_is_wizard = auth_is_admin(username);
 
         kprintf("%[S]Login successful! Welcome, %s.%[D]\n", current_user);
-        if (current_user_is_admin) {
-            kprintf("%[H]You have administrator privileges.%[D]\n");
+
+        if (current_user_is_wizard) {
+            kprintf("%[E]You are THE WIZARD - all-powerful!%[D]\n");
+            kprintf("  UID: 0 (superuser)\n");
+            kprintf("  Guild: 0 (Wizards guild)\n");
+        } else {
+            kprintf("%[H]You are an Apprentice%[D]\n");
+            kprintf("  UID: %u\n", current_session->user_id);
+            kprintf("  Guild: %u\n", current_session->guild_id);
         }
+
         return 0;
     } else {
         kprintf("%[E]Authentication failed%[D]\n");
-        kprintf("%[W]Note: Account will be locked after 5 failed attempts%[D]\n");
+        kprintf("%[W]WARNING: Account will be locked after 5 failed attempts%[D]\n");
+        return -1;
+    }
+}
+
+// ============================================================================
+// COMMAND: logout
+// ============================================================================
+
+int cmd_logout(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+
+    if (current_user[0] == '\0') {
+        kprintf("Not logged in\n");
+        return 0;
+    }
+
+    kprintf("Logging out %s...\n", current_user);
+
+    // Destroy session
+    if (current_session) {
+        auth_destroy_session(current_session);
+        current_session = NULL;
+    }
+
+    // Clear current user
+    current_user[0] = '\0';
+    current_user_is_wizard = 0;
+
+    kprintf("%[S]Logged out successfully%[D]\n");
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: adduser (Wizard only!)
+// ============================================================================
+
+int cmd_adduser(int argc, char** argv) {
+    // Check if user is logged in
+    if (current_user[0] == '\0') {
+        kprintf("%[E]Permission denied: Not logged in%[D]\n");
+        kprintf("Use 'login' first\n");
+        return -1;
+    }
+
+    // Check if user is Wizard
+    if (!current_user_is_wizard) {
+        kprintf("%[E]Permission denied: Only The Wizard can add users%[D]\n");
+        kprintf("You are an Apprentice and do not have this power!\n");
+        return -1;
+    }
+
+    if (argc < 3) {
+        kprintf("Usage: adduser <username> <password> [wizard]\n");
+        kprintf("\n%[H]Examples:%[D]\n");
+        kprintf("  adduser alice secretpass        - Create Apprentice 'alice'\n");
+        kprintf("  adduser merlin magic wizard     - Create Wizard 'merlin'\n");
+        kprintf("\n%[W]Note:%[D] Password must be 4+ characters\n");
+        return -1;
+    }
+
+    const char* username = argv[1];
+    const char* password = argv[2];
+    int is_wizard = 0;
+
+    // Check if third argument is "wizard"
+    if (argc >= 4 && strcmp(argv[3], "wizard") == 0) {
+        is_wizard = 1;
+    }
+
+    // Add user
+    int result = auth_add_user(username, password, is_wizard);
+
+    if (result == 0) {
+        kprintf("%[S]User created successfully!%[D]\n");
+        if (is_wizard) {
+            kprintf("  %s is now a WIZARD (uid < 1000)\n", username);
+        } else {
+            kprintf("  %s is now an APPRENTICE (uid >= 1000)\n", username);
+        }
+        return 0;
+    } else {
+        kprintf("%[E]Failed to create user%[D]\n");
+        return -1;
+    }
+}
+
+// ============================================================================
+// COMMAND: passwd (Change password)
+// ============================================================================
+
+int cmd_passwd(int argc, char** argv) {
+    // Check if user is logged in
+    if (current_user[0] == '\0') {
+        kprintf("%[E]Permission denied: Not logged in%[D]\n");
+        kprintf("Use 'login' first\n");
+        return -1;
+    }
+
+    if (argc < 3) {
+        kprintf("Usage: passwd <old_password> <new_password>\n");
+        kprintf("\n%[H]Security:%[D]\n");
+        kprintf("  - Old password must match current password\n");
+        kprintf("  - New password must be 4+ characters\n");
+        kprintf("  - Password will be hashed with salt\n");
+        return -1;
+    }
+
+    const char* old_pass = argv[1];
+    const char* new_pass = argv[2];
+
+    // Change password
+    int result = auth_change_password(current_user, old_pass, new_pass);
+
+    if (result == 0) {
+        kprintf("%[S]Password changed successfully!%[D]\n");
+        return 0;
+    } else {
+        kprintf("%[E]Failed to change password%[D]\n");
         return -1;
     }
 }
