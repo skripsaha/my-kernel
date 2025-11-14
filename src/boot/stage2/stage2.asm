@@ -28,9 +28,9 @@
 ; === CONSTANTS ===
 KERNEL_LOAD_ADDR      equ 0x10000
 KERNEL_SECTOR_START   equ 10
-KERNEL_SECTOR_COUNT   equ 290
-KERNEL_SIZE_BYTES     equ 148480        ; 290 * 512
-KERNEL_END_ADDR       equ 0x34400       ; 0x10000 + 0x24400 (148480 bytes)
+KERNEL_SECTOR_COUNT   equ 320          ; FIXED: Sync with Makefile (320 sectors)
+KERNEL_SIZE_BYTES     equ 163840       ; FIXED: 320 * 512 = 163840 bytes
+KERNEL_END_ADDR       equ 0x38000      ; FIXED: 0x10000 + 163840 = 0x38000
 
 PAGE_TABLE_BASE       equ 0x500000      ; MOVED: Above kernel BSS (was 0x70000)
 E820_MAP_ADDR         equ 0x500         ; Low memory (safe after BIOS data area)
@@ -158,10 +158,41 @@ long_mode_start:
     mov [rdi+4], ax
     mov al, 'M'
     mov [rdi+6], ax
-    
-    ; Prepare parameters for kernel
-    mov rdi, E820_MAP_ADDR              ; E820 memory map address
-    movzx rsi, word [E820_COUNT_ADDR]   ; E820 entry count
+
+    ; === CRITICAL DEBUG: Print E820 count to serial BEFORE jumping to kernel ===
+    mov dx, 0x3f8          ; Serial port
+    mov al, '['
+    out dx, al
+    mov al, 'E'
+    out dx, al
+    mov al, '8'
+    out dx, al
+    mov al, '2'
+    out dx, al
+    mov al, '0'
+    out dx, al
+    mov al, '='
+    out dx, al
+    ; Print count as hex digit
+    movzx rax, word [E820_COUNT_ADDR]
+    and al, 0x0F           ; Get low nibble
+    cmp al, 10
+    jl .digit
+    add al, 'A' - 10
+    jmp .print_digit
+.digit:
+    add al, '0'
+.print_digit:
+    out dx, al
+    mov al, ']'
+    out dx, al
+    mov al, ' '
+    out dx, al
+
+    ; CRITICAL FIX: Prepare ALL 3 parameters for kernel_main(e820_map, e820_count, mem_start)
+    mov rdi, E820_MAP_ADDR              ; ARG1: E820 memory map address (0x500)
+    movzx rsi, word [E820_COUNT_ADDR]   ; ARG2: E820 entry count (from 0x4FE)
+    mov rdx, 0x100000                   ; ARG3: mem_start (1MB mark)
 
     ; Verify kernel was loaded (check first 8 bytes)
     mov rax, [KERNEL_LOAD_ADDR]
@@ -176,6 +207,7 @@ long_mode_start:
     mov [BOOT_INFO_ADDR+12], dword KERNEL_END_ADDR ; Kernel end address
 
     ; Jump to kernel entry point
+    ; IMPORTANT: RDI, RSI, RDX must be preserved until kernel_main() is called!
     jmp KERNEL_LOAD_ADDR
     
 .kernel_not_loaded:
@@ -762,9 +794,10 @@ gdt_descriptor:
     dd gdt_start                  ; Base address (32-bit в 16-bit режиме)
 
 ; ===== DAP STRUCTURES FOR INT 13h EXTENSIONS (LBA MODE) =====
-; Total: 250 sectors = 125KB
+; FIXED: Total: 320 sectors = 160KB (sync with Makefile)
 ; Part 1: 127 sectors (max single read) → 0x10000
-; Part 2: 123 sectors (250-127)        → 0x1FE00
+; Part 2: 127 sectors                  → 0x1FE00
+; Part 3:  66 sectors (320-127-127)    → 0x2FC00
 align 4
 dap1:
     db 0x10             ; DAP size (16 bytes)
@@ -787,7 +820,7 @@ align 4
 dap3:
     db 0x10             ; DAP size (16 bytes)
     db 0                ; Reserved
-    dw 36               ; Sector count: 36 (290 - 127 - 127 = 36)
+    dw 66               ; FIXED: Sector count: 66 (320 - 127 - 127 = 66)
     dw 0x0000           ; Offset
     dw 0x2FC0           ; Segment (0x2FC0:0x0000 = 0x2FC00 physical)
     dq 264              ; Starting LBA sector: 264 (10 + 127 + 127)
@@ -800,8 +833,8 @@ msg_e820_success      db '[OK] E820 memory map created', 13, 10, 0
 msg_e820_fail         db '[WARN] E820 failed, using fallback', 13, 10, 0
 msg_memory_fallback   db '[OK] Fallback memory detection', 13, 10, 0
 msg_memory_error      db '[ERROR] Memory detection failed!', 13, 10, 0
-msg_loading_kernel    db 'Loading kernel (290 sectors)...', 13, 10, 0
-msg_kernel_loaded     db '[OK] Kernel loaded (145KB)', 13, 10, 0
+msg_loading_kernel    db 'Loading kernel (320 sectors)...', 13, 10, 0
+msg_kernel_loaded     db '[OK] Kernel loaded (160KB)', 13, 10, 0
 msg_kernel_empty      db '[WARN] Kernel appears empty', 13, 10, 0
 msg_disk_error        db '[ERROR] Disk read failed!', 13, 10, 0
 msg_long_mode_ok      db '[OK] CPU supports 64-bit mode', 13, 10, 0
