@@ -29,37 +29,58 @@ void pmm_init(void) {
     kprintf("[PMM] Fetching e820 memory map...\n");
     e820_entry_t* entries = memory_map_get_entries();
     size_t entry_count = memory_map_get_entry_count();
-    kprintf("[PMM] e820 entry count = %d\n", entry_count);
 
+    // CRITICAL DEBUG: Check raw E820 data
+    kprintf("[PMM] entries pointer = %p\n", (void*)entries);
+    kprintf("[PMM] entry_count from e820.c = %d\n", (int)entry_count);
+
+    // BUGFIX: Read count directly from bootloader location if e820.c failed
     if (entry_count == 0) {
-        panic("[PMM] ERROR: e820 map is empty!");
-    }
+        kprintf("[PMM] WARNING: e820.c reports 0 entries!\n");
+        kprintf("[PMM] Reading count directly from bootloader at 0x4FE...\n");
+        uint16_t* count_ptr = (uint16_t*)0x4FE;
+        entry_count = *count_ptr;
+        kprintf("[PMM] Count from 0x4FE = %d\n", (int)entry_count);
 
-    // Print all entries for debug
-    for (size_t i = 0; i < entry_count; i++) {
-        if(entries[i].type != 0){
-            kprintf("  #%d: base=0x%p len=0x%p type=%d\n", i, (void*)entries[i].base, (void*)entries[i].length, entries[i].type);
+        if (entry_count > 0 && entry_count < 100) {  // Sanity check
+            entries = (e820_entry_t*)0x500;  // Read directly from bootloader location
+            kprintf("[PMM] Using E820 data directly from 0x500\n");
+        } else {
+            kprintf("[PMM] INVALID count from 0x4FE: %d\n", (int)entry_count);
+            panic("[PMM] ERROR: e820 map is empty or corrupted!");
         }
     }
-    kprintf("  Other entries are ZERO.\n");
-    kprintf("  %[W]Do not use type 2 entries. Only type 1 - only RAM.%[D]\n\n");
+
+    kprintf("[PMM] Total e820 entries: %d\n", (int)entry_count);
+
+    // Print all entries for debug (SIMPLIFIED FORMAT - kprintf may not support %llx)
+    for (size_t i = 0; i < entry_count && i < 20; i++) {  // Limit to 20 to avoid spam
+        // Split 64-bit values into 32-bit parts for printing
+        uint32_t base_low = (uint32_t)(entries[i].base & 0xFFFFFFFF);
+        uint32_t base_high = (uint32_t)(entries[i].base >> 32);
+        uint32_t len_low = (uint32_t)(entries[i].length & 0xFFFFFFFF);
+        uint32_t len_high = (uint32_t)(entries[i].length >> 32);
+
+        kprintf("  E820[%d]: base=0x%x%08x len=0x%x%08x type=%d\n",
+                (int)i, base_high, base_low, len_high, len_low, entries[i].type);
+    }
 
     // Find the highest usable RAM address
     uintptr_t mem_end = 0;
-    kprintf("[PMM] DEBUG: Scanning %zu entries for usable RAM...\n", entry_count);
+    kprintf("[PMM] Scanning for USABLE RAM (type=%d)...\n", E820_USABLE);
+
     for (size_t i = 0; i < entry_count; i++) {
-        kprintf("[PMM] Entry %zu: base=0x%llx len=0x%llx type=%u\n",
-                i, entries[i].base, entries[i].length, entries[i].type);
         if (entries[i].type == E820_USABLE && entries[i].length > 0) {
-            kprintf("[PMM] --> USABLE!\n");
             uintptr_t region_end = entries[i].base + entries[i].length;
+            kprintf("[PMM] Entry %d: USABLE from %p to %p\n",
+                    (int)i, (void*)entries[i].base, (void*)region_end);
             if (region_end > mem_end) {
                 mem_end = region_end;
-                kprintf("[PMM] --> New mem_end = 0x%llx\n", (unsigned long long)mem_end);
             }
         }
     }
-    kprintf("[PMM] mem_end = 0x%p\n", (void*)mem_end);
+
+    kprintf("[PMM] Highest usable address (mem_end) = %p\n", (void*)mem_end);
 
     if (mem_end <= 0x100000) {
         panic("[PMM] ERROR: Not enough usable RAM!");
