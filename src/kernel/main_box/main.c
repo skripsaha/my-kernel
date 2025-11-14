@@ -15,6 +15,7 @@
 #include "keyboard.h"
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
+#include "event_ipc.h"
 #include "shell.h"
 #include "serial.h"
 #include "usermode.h"
@@ -134,6 +135,12 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     eventdriven_system_init();
     eventdriven_system_start();
     kprintf("%[S] Event-driven system initialized!%[D]\n");
+
+    // === IPC SYSTEM (Event-based task communication - NO SYSCALLS!) ===
+    kprintf("\n%[H]=== Step 6.5: Event-Based IPC === %[D]\n");
+    event_ipc_init();
+    kprintf("%[S] Event-based IPC initialized (NO syscalls!)%[D]\n");
+
     kprintf("%[H]System ready. Enabling interrupts for testing...%[D]\n");
     
     // Включаем прерывания для тестирования
