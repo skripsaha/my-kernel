@@ -43,6 +43,20 @@ _start:
     mov dx, 0x3f8
     out dx, al
 
+    ; === CRITICAL DEBUG: Check E820 data BEFORE BSS clear ===
+    ; Read E820 count from 0x4FE
+    movzx rax, word [0x4FE]
+    ; If count > 0, print 'E', otherwise print 'Z'
+    test rax, rax
+    jz .e820_zero
+    mov al, 'E'            ; 'E' = E820 data exists
+    jmp .print_e820_status
+.e820_zero:
+    mov al, 'Z'            ; 'Z' = Zero count!
+.print_e820_status:
+    mov dx, 0x3f8
+    out dx, al
+
     ; === CRITICAL: Zero out BSS section ===
     ; All uninitialized global variables must be zeroed
     mov rdi, __bss_start
@@ -54,6 +68,18 @@ _start:
 
     ; Debug message after BSS zeroing
     mov al, 'B'
+    mov dx, 0x3f8
+    out dx, al
+
+    ; === CRITICAL DEBUG: Check E820 data AFTER BSS clear ===
+    movzx rax, word [0x4FE]
+    test rax, rax
+    jz .e820_zero_after
+    mov al, 'A'            ; 'A' = E820 still exists After BSS
+    jmp .print_e820_status_after
+.e820_zero_after:
+    mov al, 'X'            ; 'X' = E820 got eXterminated by BSS!
+.print_e820_status_after:
     mov dx, 0x3f8
     out dx, al
 
