@@ -25,8 +25,8 @@ typedef struct {
     int in_use;                // 1 if FD is active, 0 if free
 } FileDescriptor;
 
-// Глобальная таблица открытых файлов
-#define MAX_OPEN_FILES 256
+// Глобальная таблица открытых файлов (REDUCED to save RAM!)
+#define MAX_OPEN_FILES 32  // Уменьшено с 256 до 32 (CRITICAL BSS FIX!)
 static FileDescriptor fd_table[MAX_OPEN_FILES];
 static spinlock_t fd_table_lock;
 

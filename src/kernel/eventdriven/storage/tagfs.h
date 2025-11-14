@@ -35,9 +35,9 @@
 #define TAGFS_MAX_TAGS_PER_FILE 32     // Максимум тегов на файл
 #define TAGFS_TAG_KEY_SIZE      32     // Размер ключа тега (например "type")
 #define TAGFS_TAG_VALUE_SIZE    64     // Размер значения тега (например "image")
-#define TAGFS_MAX_TAG_INDEX     1024   // Максимум уникальных тегов в индексе
+#define TAGFS_MAX_TAG_INDEX     128    // Максимум уникальных тегов в индексе (уменьшено!)
 
-#define TAGFS_MAX_FILES         65536  // Максимум файлов
+#define TAGFS_MAX_FILES         1024   // Максимум файлов (уменьшено для экономии RAM!)
 #define TAGFS_MAX_FILE_SIZE     (1ULL << 32)  // 4GB на файл
 #define TAGFS_INODE_SIZE        512    // Размер структуры FileInode на диске
 

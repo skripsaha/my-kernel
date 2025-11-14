@@ -8,9 +8,9 @@
 
 TagFSContext global_tagfs;
 
-// PRODUCTION FIX: Use reasonable default size for RAM storage
-// 128 blocks * 4KB = 512KB (not 512MB as old comment incorrectly claimed)
-#define TAGFS_MEM_BLOCKS 128  // 512KB of RAM storage for superblock, inodes, etc.
+// CRITICAL FIX: Reduce RAM usage to prevent triple fault during BSS clearing
+// 16 blocks * 4KB = 64KB (minimal RAM storage for superblock, inodes, etc.)
+#define TAGFS_MEM_BLOCKS 16  // 64KB of RAM storage (REDUCED to fix BSS size!)
 
 // Static storage array (used for superblock and metadata even in disk mode)
 static uint8_t tagfs_storage[TAGFS_MEM_BLOCKS][TAGFS_BLOCK_SIZE];

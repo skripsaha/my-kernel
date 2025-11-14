@@ -79,8 +79,11 @@ _start:
     ; === CRITICAL: Zero out BSS section ===
     ; All uninitialized global variables must be zeroed
     ; NOTE: R12-R14 preserve our parameters automatically (callee-saved)
-    mov rdi, __bss_start
-    mov rcx, __bss_end
+    ; CRITICAL FIX: __bss_start and __bss_end are VIRTUAL addresses, but kernel is loaded at PHYSICAL 0x10000!
+    ; We DON'T need to add offset because linker.ld already puts BSS at correct address!
+    ; But let's use RELATIVE addressing to be safe:
+    lea rdi, [rel __bss_start]  ; RDI = physical address of BSS start
+    lea rcx, [rel __bss_end]    ; RCX = physical address of BSS end
     sub rcx, rdi                ; RCX = size of BSS in bytes
     shr rcx, 3                  ; Divide by 8 (we're clearing 8 bytes at a time)
     xor rax, rax                ; RAX = 0

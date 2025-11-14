@@ -92,10 +92,10 @@ typedef enum {
 #define DECK_PREFIX_NETWORK     4  // Network operations (stub в v1)
 
 // ============================================================================
-// EVENT STRUCTURE - Основная структура события (256 байт)
+// EVENT STRUCTURE - Основная структура события (96 байт) - REDUCED!
 // ============================================================================
 
-#define EVENT_DATA_SIZE 224
+#define EVENT_DATA_SIZE 64  // Уменьшено с 224 для экономии RAM! (CRITICAL FIX)
 
 typedef struct __attribute__((packed)) {
     // === METADATA (32 bytes) ===
@@ -105,12 +105,12 @@ typedef struct __attribute__((packed)) {
     uint32_t type;            // Тип события (EventType)
     uint32_t flags;           // Дополнительные флаги
 
-    // === PAYLOAD (224 bytes) ===
+    // === PAYLOAD (64 bytes) - REDUCED to save RAM! ===
     uint8_t data[EVENT_DATA_SIZE];  // Данные события
 } Event;
 
-// Compile-time проверка размера
-_Static_assert(sizeof(Event) == 256, "Event must be exactly 256 bytes");
+// Compile-time проверка размера (UPDATED: reduced to 96 bytes to save RAM!)
+_Static_assert(sizeof(Event) == 96, "Event must be exactly 96 bytes (32 metadata + 64 payload)");
 
 // ============================================================================
 // RESPONSE STRUCTURE - Ответ от kernel к user (4096 байт)
