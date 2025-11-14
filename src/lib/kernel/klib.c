@@ -57,7 +57,6 @@ void* kmalloc(size_t size) {
                 new_block->size = curr->size - size - sizeof(mem_block_t);
                 new_block->next = curr->next;
                 new_block->magic = KLIB_MAGIC_NUMBER;
-                new_block->_padding = 0;  // Initialize padding
                 curr->size = size;
                 curr->next = new_block;
             }

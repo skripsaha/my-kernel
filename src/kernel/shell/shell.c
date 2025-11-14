@@ -721,8 +721,8 @@ int cmd_erase(int argc, char** argv) {
     }
 
     // Check permissions
-    if (!current_user_is_admin) {
-        kprintf("%[E]Permission denied: Only administrators can permanently erase files%[D]\n");
+    if (!current_user_is_wizard) {
+        kprintf("%[E]Permission denied: Only The Wizard can permanently erase files%[D]\n");
         kprintf("Use 'trash' instead to move file to trash.\n");
         return -1;
     }
@@ -899,7 +899,7 @@ int cmd_info(int argc, char** argv) {
 
     // User info
     kprintf("User: %s %s\n", current_user,
-            current_user_is_admin ? "(administrator)" : "(standard user)");
+            current_user_is_wizard ? "(The Wizard)" : "(Apprentice)");
     kprintf("Shell: BoxOS Shell v2.0\n");
 
     kprintf("\n");
@@ -939,8 +939,8 @@ int cmd_reboot(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    if (!current_user_is_admin) {
-        kprintf("%[E]Permission denied: Only administrators can reboot the system%[D]\n");
+    if (!current_user_is_wizard) {
+        kprintf("%[E]Permission denied: Only The Wizard can reboot the system%[D]\n");
         return -1;
     }
 
@@ -973,8 +973,8 @@ int cmd_byebye(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    if (!current_user_is_admin) {
-        kprintf("%[E]Permission denied: Only administrators can shutdown the system%[D]\n");
+    if (!current_user_is_wizard) {
+        kprintf("%[E]Permission denied: Only The Wizard can shutdown the system%[D]\n");
         return -1;
     }
 

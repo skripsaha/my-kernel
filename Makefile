@@ -36,10 +36,10 @@ QEMU     = qemu-system-x86_64
 # Bootloader layout:
 #   Sector 1     : Stage1 (512 bytes, MBR)
 #   Sectors 2-10 : Stage2 (9 sectors = 4608 bytes)
-#   Sectors 11+  : Kernel (320 sectors = 163840 bytes = 160KB)
+#   Sectors 11+  : Kernel (400 sectors = 204800 bytes = 200KB)
 STAGE2_SECTORS      = 9
-KERNEL_SECTORS      = 320
-KERNEL_MAX_BYTES    = 163840    # 320 * 512
+KERNEL_SECTORS      = 400
+KERNEL_MAX_BYTES    = 204800    # 400 * 512
 KERNEL_START_SECTOR = 10
 
 ASMFLAGS       =  -g -f bin
